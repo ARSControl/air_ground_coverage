@@ -1,0 +1,20 @@
+[project]
+name = "hedac"
+version = "0.1.0"
+description = "Heat Equation Driven Area Coverage - A multi-agent ergodic control algorithm"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.10.8",
+    "numba>=0.63.1",
+    "numpy>=1.22.0",
+    "pyaml>=25.7.0",
+    "pyqt6>=6.10.2",
+    "pyyaml>=6.0.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+]

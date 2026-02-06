@@ -1,0 +1,71 @@
+# HEDAC Configuration Schema
+# This file defines the structure and defaults for HEDAC parameters
+
+# Simulation Parameters
+simulation:
+  num_steps: 2000              # Number of simulation steps
+  num_agents: 1                # Number of agents
+  dt: 0.1                      # Time step for heat equation
+  random_seed: 42              # Random seed for reproducibility
+
+# Heat Equation Parameters
+heat_equation:
+  alpha: 1                   # Heat diffusion coefficient
+  source_strength: 1.0         # Source term scaling
+  beta: 0.01                   # Heat decay coefficient
+  local_cooling: 0.1           # Local cooling coefficient
+  cfl_safety: 1.0
+
+# Agent Parameters
+agents:
+  max_velocity: 3.0            # Maximum velocity
+  max_acceleration: 0.5        # Maximum acceleration
+  max_angular_velocity: 0.785  # Maximum angular velocity (rad/s) = pi/4
+  max_angular_acceleration: 0.393  # Maximum angular acceleration (rad/s^2) = pi/8
+  dt_agent: 0.1                # Agent time step
+  agent_radius: 0.5            # Agent radius for coverage block
+  min_kernel_val: 0.01         # Minimum kernel value threshold
+  wall_avoidance_weight: 1.0     # Weight for wall avoidance behavior
+
+# Sensor/FOV Parameters
+sensor:
+  fov_degrees: 90.0            # Field of view angle in degrees
+  fov_depth: 5.0               # Field of view depth
+
+# Multi-Agent Parameters
+multi_agent:
+  sensing_range: 10.0          # Range for agent communication
+  min_safe_distance: 1.0       # Minimum safe distance between agents
+
+# Map Parameters
+map:
+  # Option 1: Load from file
+  # path: "maps/simple_map.npy"
+  
+  # Option 2: Create obstacle-free
+  size: [50, 50]               # [height, width] in cells
+  resolution: 1.0              # Meters per cell
+  
+  # Map values: 0 = free, 1 = obstacle
+
+# Goal Density Parameters
+goal_density:
+  type: "gaussian_mixture"     # Options: "gaussian_mixture", "uniform", "file"
+  num_peaks: 1                # Number of Gaussian peaks (for gaussian_mixture)
+  
+  # For custom goal density, provide file path:
+  # file_path: "goal_densities/custom.npy"
+
+# Visualization Parameters
+visualization:
+  plot_frequency: 10           # Plot every N steps (0 = no plotting)
+  save_video: false            # Save video of simulation
+  video_fps: 30                # Video frames per second
+  video_path: "output/hedac_simulation.mp4"
+
+# Output Parameters
+output:
+  save_results: true           # Save results to file
+  results_path: "output/results.npz"
+  verbose: true                # Print progress
+  print_frequency: 100         # Print every N steps

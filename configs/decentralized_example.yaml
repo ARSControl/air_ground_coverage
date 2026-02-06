@@ -1,0 +1,59 @@
+# Example: Decentralized HEDAC with Multi-Agent Coordination
+# 
+# In this configuration, each agent maintains its own:
+# - Heat field
+# - Coverage density
+# - Local cooling field
+#
+# When agents come within sensing range, they:
+# - Share coverage information
+# - Use local cooling to avoid collisions
+
+simulation:
+  num_steps: 1500
+  num_agents: 4
+  dt: 0.1
+  random_seed: 42
+
+heat_equation:
+  alpha: 0.1
+  source_strength: 1.0
+  beta: 0.01
+  local_cooling: 0.1
+
+agents:
+  max_velocity: 1.0
+  max_acceleration: 0.5
+  max_angular_velocity: 0.785  # pi/4
+  max_angular_acceleration: 0.393  # pi/8
+  dt_agent: 0.1
+  agent_radius: 0.5
+  min_kernel_val: 0.01
+
+sensor:
+  fov_degrees: 90.0
+  fov_depth: 5.0
+
+multi_agent:
+  sensing_range: 10.0          # Agents share info when within this range
+  min_safe_distance: 1.5       # Minimum distance for collision avoidance
+
+map:
+  size: [50, 50]
+  resolution: 1.0
+
+goal_density:
+  type: "gaussian_mixture"
+  num_peaks: 4
+
+visualization:
+  plot_frequency: 50
+  save_video: false
+  video_fps: 30
+  video_path: "output/decentralized_simulation.mp4"
+
+output:
+  save_results: true
+  results_path: "output/results_decentralized.npz"
+  verbose: true
+  print_frequency: 100
