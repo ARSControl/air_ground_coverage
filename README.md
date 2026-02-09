@@ -1,7 +1,7 @@
 # HEDAC: Heat Equation Driven Area Coverage
 
 A cleaned and improved implementation of the HEDAC algorithm for multi-agent
-ergodic control based on the paper by Sarah Dean et al.
+ergodic control based on the paper by Ivić et al.
 
 ## Installation
 
