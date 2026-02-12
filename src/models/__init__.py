@@ -2,6 +2,12 @@
 Agent models for HEDAC.
 """
 
-from .agents import DoubleIntegratorAgent, AgentTeam, AgentState
+from .agents import AgentLike, DoubleIntegratorAgent, DubinsAgent, AgentTeam, AgentState
 
-__all__ = ["DoubleIntegratorAgent", "AgentTeam", "AgentState"]
+__all__ = [
+    "AgentLike",
+    "DoubleIntegratorAgent",
+    "DubinsAgent",
+    "AgentTeam",
+    "AgentState",
+]

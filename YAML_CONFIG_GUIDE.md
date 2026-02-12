@@ -101,6 +101,7 @@ heat_equation:
 
 ```yaml
 agents:
+  model_type: "double_integrator"  # Options: "double_integrator", "dubins"
   max_velocity: 1.0            # Maximum velocity (m/s)
   max_acceleration: 0.5        # Maximum acceleration (m/s^2)
   max_angular_velocity: 0.785  # Maximum angular velocity (rad/s)
@@ -108,6 +109,10 @@ agents:
   dt_agent: 0.1                # Agent time step
   agent_radius: 0.5            # Agent radius for coverage block
   min_kernel_val: 0.01         # Minimum kernel value threshold
+
+  dubins:
+    forward_speed: 5.0          # Constant forward speed (m/s)
+    max_bank_angle: 30.0        # Maximum bank angle (deg)
 ```
 
 ### `sensor` Section

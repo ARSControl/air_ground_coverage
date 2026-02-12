@@ -11,6 +11,8 @@ dependencies = [
     "pyaml>=25.7.0",
     "pyqt6>=6.10.2",
     "pyyaml>=6.0.0",
+    "scipy>=1.10.0",
+    "scikit-learn>=1.7.2",
 ]
 
 [tool.uv]

@@ -1,7 +1,3 @@
-"""
-Cleaned utility functions for HEDAC.
-"""
-
 import numpy as np
 from numba import njit, prange
 from typing import Tuple, Optional
@@ -529,7 +525,7 @@ def create_gaussian_goal_density(
     density_map = density_map * (map_array == 0)
 
     # Renormalize after masking
-    return normalize_to_pdf(density_map, map_array)
+    return density_map
 
 
 # =============================================================================

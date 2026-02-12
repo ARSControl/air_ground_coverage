@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.core.base import HEDACParams, MapLoader
 from src.core.hedac import HEDACAlgorithm
-from src.models.agents import DoubleIntegratorAgent, AgentTeam
+from src.models.agents import DoubleIntegratorAgent, DubinsAgent, AgentTeam
 from src.utils.math_utils import min_max_normalize
 
 
@@ -37,7 +37,7 @@ def create_gaussian_goal_density(
     grid_points = np.column_stack([grid_x.ravel(), grid_y.ravel()])
 
     # Random Gaussian centers in free space
-    
+
     if len(free_cells) > num_peaks:
         indices = np.random.choice(len(free_cells), num_peaks, replace=False)
         # free_cells is in [y, x] format (row, col), convert to [x, y]
@@ -153,17 +153,30 @@ def run_hedac_from_config(config_path: str):
             [map_array.shape[1], map_array.shape[0]]  # [width, height]
         )
 
+    model_type = params.get("agents.model_type", "double_integrator")
+
     for i in range(params.num_agents):
-        agent = DoubleIntegratorAgent(
-            x0=initial_positions[i],
-            theta0=np.random.uniform(0, 2 * np.pi),
-            max_dx=params.max_dx,
-            max_ddx=params.max_ddx,
-            max_dtheta=params.max_dtheta,
-            max_ddtheta=params.max_ddtheta,
-            dt=params.dt_agent,
-            agent_id=i,
-        )
+        if model_type == "dubins":
+            dubins_config = params.get("agents.dubins", {})
+            agent = DubinsAgent(
+                x0=initial_positions[i],
+                theta0=np.random.uniform(0, 2 * np.pi),
+                forward_speed=float(dubins_config.get("forward_speed", 5.0) or 5.0),
+                max_bank_angle=float(dubins_config.get("max_bank_angle", 30.0) or 30.0),
+                dt=params.dt_agent,
+                agent_id=i,
+            )
+        else:
+            agent = DoubleIntegratorAgent(
+                x0=initial_positions[i],
+                theta0=np.random.uniform(0, 2 * np.pi),
+                max_dx=params.max_dx,
+                max_ddx=params.max_ddx,
+                max_dtheta=params.max_dtheta,
+                max_ddtheta=params.max_ddtheta,
+                dt=params.dt_agent,
+                agent_id=i,
+            )
         agent.sens_range = params.sens_range
         agents.append(agent)
 

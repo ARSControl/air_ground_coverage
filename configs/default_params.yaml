@@ -12,20 +12,25 @@ simulation:
 heat_equation:
   alpha: 1                   # Heat diffusion coefficient
   source_strength: 1.0         # Source term scaling
-  beta: 0.01                   # Heat decay coefficient
+  beta: 0.1                   # Heat decay coefficient
   local_cooling: 0.1           # Local cooling coefficient
   cfl_safety: 1.0
 
 # Agent Parameters
 agents:
+  model_type: "dubins"  # Options: "double_integrator", "dubins"
   max_velocity: 3.0            # Maximum velocity
   max_acceleration: 0.5        # Maximum acceleration
   max_angular_velocity: 0.785  # Maximum angular velocity (rad/s) = pi/4
   max_angular_acceleration: 0.393  # Maximum angular acceleration (rad/s^2) = pi/8
   dt_agent: 0.1                # Agent time step
-  agent_radius: 0.5            # Agent radius for coverage block
-  min_kernel_val: 0.01         # Minimum kernel value threshold
+  agent_radius: 5.0            # Agent radius for coverage block
+  min_kernel_val: 0.000001         # Minimum kernel value threshold
   wall_avoidance_weight: 1.0     # Weight for wall avoidance behavior
+
+  dubins:
+    forward_speed: 5.0          # Constant forward speed (m/s)
+    max_bank_angle: 30.0        # Maximum bank angle (deg)
 
 # Sensor/FOV Parameters
 sensor:
@@ -36,6 +41,21 @@ sensor:
 multi_agent:
   sensing_range: 10.0          # Range for agent communication
   min_safe_distance: 1.0       # Minimum safe distance between agents
+
+gpr:
+  sigma_f: 1.0                 # Signal variance for RBF kernel
+  length_scale: 1.0            # Length scale for RBF kernel
+  noise_level: 0.01             # Noise level for GP
+  gamma: 0                      # Exploration-exploitation balance
+  obs_noise_std: 0.01          # Std of observation noise
+  obs_per_step: 10             # Observations per step per agent
+  min_samples: 10              # Min samples before GP prediction
+  use_filter: true             # Enable uncertainty-based filtering
+  take_threshold: 0.15         # Add obs if uncertainty > threshold
+  remove_threshold: -1       # Remove obs if uncertainty < threshold
+  max_dataset_size: 500        # Cap dataset size (latest retained)
+  fit_hyperparams: true        # Enable hyperparameter optimization
+  fit_interval: 10             # Fit at most every N steps (0 = every update)
 
 # Map Parameters
 map:
@@ -62,6 +82,10 @@ visualization:
   save_video: false            # Save video of simulation
   video_fps: 30                # Video frames per second
   video_path: "output/hedac_simulation.mp4"
+  gp_debug: true              # Enable GP debug visualization
+  gp_debug_interval: 100        # Plot every N steps
+  save_gp_frames: true        # Save GP frames instead of showing
+  gp_output_dir: "output/gp_debug"  # Output dir for GP frames
 
 # Output Parameters
 output:

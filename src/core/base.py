@@ -71,6 +71,13 @@ class HEDACParams:
         self.map_config = config.get("map", {})
         self.resolution = self.map_config.get("resolution", 1.0)
 
+        # gpr parameters
+        gpr_config = config.get("gpr", {})
+        self.length_scale = gpr_config.get("length_scale", 1.0)
+        self.sigma_f = gpr_config.get("sigma_f", 1.0)
+        self.noise_level = gpr_config.get("noise_level", 0.1)
+        self.alpha_gpr = gpr_config.get("alpha", 1e-10)
+
         # Grid dimensions (set after loading map)
         self.width = 50
         self.height = 50
