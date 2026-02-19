@@ -1,0 +1,67 @@
+# MPC Configuration Schema
+# This file defines the structure and defaults for ground robots parameters
+
+simulation:
+  num_agents: 3
+  num_obstacles: 0
+  obstacles_radius: 1.0
+
+mpc:
+  horizon: 5  # MPC horizon length
+  max_iterations: 300  # Max iterations for MPC solver
+  print_time: False  # Whether to print MPC solve time
+  tolerance: 1e-4  # Convergence tolerance for MPC solver
+
+# Agent Parameters
+agents:
+  model_type: "unicycle"  # Options: "double_integrator", "unicycle"
+  max_velocity: 5            # Maximum velocity
+  max_acceleration: 3        # Maximum acceleration
+  max_angular_velocity: 4  # Maximum angular velocity (rad/s) = pi/4
+  max_angular_acceleration: 2  # Maximum angular acceleration (rad/s^2) = pi/8
+  dt_agent: 0.1                # Agent time step
+  agent_radius: 5.0            # Agent radius for coverage block
+  min_kernel_val: 0.000001         # Minimum kernel value threshold
+  wall_avoidance_weight: 1.0     # Weight for wall avoidance behavior
+
+  dubins:
+    forward_speed: 5.0          # Constant forward speed (m/s)
+    max_bank_angle: 30.0        # Maximum bank angle (deg)
+
+# Sensor/FOV Parameters
+sensor:
+  fov_degrees: 90.0            # Field of view angle in degrees
+  fov_depth: 10.0               # Field of view depth
+
+# Multi-Agent Parameters
+multi_agent:
+  sensing_range: 10.0          # Range for agent communication
+  min_safe_distance: 1.0       # Minimum safe distance between agents
+
+gpr:
+  sigma_f: 1.0                 # Signal variance for RBF kernel
+  length_scale: 1.0            # Length scale for RBF kernel
+  noise_level: 0.01             # Noise level for GP
+  gamma: 0                      # Exploration-exploitation balance
+  obs_noise_std: 0.01          # Std of observation noise
+  obs_per_step: 10             # Observations per step per agent
+  min_samples: 10              # Min samples before GP prediction
+  use_filter: true             # Enable uncertainty-based filtering
+  take_threshold: 0.15         # Add obs if uncertainty > threshold
+  remove_threshold: -1       # Remove obs if uncertainty < threshold
+  max_dataset_size: 500        # Cap dataset size (latest retained)
+  fit_hyperparams: true        # Enable hyperparameter optimization
+  fit_interval: 10             # Fit at most every N steps (0 = every update)
+
+# Map Parameters
+map:
+  # Option 1: Load from file
+  # path: "maps/simple_map.npy"
+  
+  # Option 2: Create obstacle-free
+  size: [50, 50]               # [height, width] in cells
+  resolution: 0.1              # Meters per cell
+  local_grid_points: 100
+
+  
+  # Map values: 0 = free, 1 = obstacle

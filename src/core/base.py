@@ -37,6 +37,8 @@ class HEDACParams:
         sim = config.get("simulation", {})
         self.num_steps = sim.get("num_steps", 1000)
         self.num_agents = sim.get("num_agents", 1)
+        self.num_obstacles = sim.get("num_obstacles", 0)
+        self.obstacles_radius = sim.get("obstacles_radius", 1.0)
         self.dt = sim.get("dt", 0.1)
         self.random_seed = sim.get("random_seed", 42)
 
@@ -70,6 +72,7 @@ class HEDACParams:
         # Map parameters
         self.map_config = config.get("map", {})
         self.resolution = self.map_config.get("resolution", 1.0)
+        self.local_grid_points = self.map_config.get("local_grid_points", 1000)
 
         # gpr parameters
         gpr_config = config.get("gpr", {})
@@ -77,6 +80,14 @@ class HEDACParams:
         self.sigma_f = gpr_config.get("sigma_f", 1.0)
         self.noise_level = gpr_config.get("noise_level", 0.1)
         self.alpha_gpr = gpr_config.get("alpha", 1e-10)
+
+        # MPC parameters
+        mpc_config = config.get("mpc", {})
+        self.mpc_horizon = mpc_config.get("horizon", 10)
+        self.mpc_tolerance = mpc_config.get("tolerance", 1e-4)
+        self.mpc_tolerance = float(self.mpc_tolerance)  # Ensure it's a float
+        self.mpc_max_iters = mpc_config.get("max_iterations", 100)
+        self.mpc_print_time = mpc_config.get("print_time", False)
 
         # Grid dimensions (set after loading map)
         self.width = 50
