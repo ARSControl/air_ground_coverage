@@ -67,9 +67,16 @@ def limfov_coverage_cost(state, grid_points, weights, r_max=5.0, half_fov=np.pi,
     
     # Smooth sigmoid mask: 1 when |angle| < half_fov, 0 otherwise
     # This gives better gradients for IPOPT than hard threshold
-    mask = 1.0 / (1.0 + ca.exp(k * (ca.fabs(angles) - half_fov)))
+    # mask = 1.0 / (1.0 + ca.exp(k * (ca.fabs(angles) - half_fov)))
+    angle_error = angles - half_fov
+    mask = ca.exp(- (angle_error**2) / (2 * half_fov**2))
+
+    cost = -ca.sum1(f * mask * weights)
+    global_attraction = ca.sum1(weights * ca.exp(-r2 / (3*r_max**2)))
+    cost -= 3.0 * global_attraction
     
-    return -ca.sum1(f * mask * weights)
+    # return -ca.sum1(f * mask * weights)
+    return cost
 
 def orientation_cost(state, grid_points, weights, r_max):
     """

@@ -6,6 +6,7 @@ import argparse
 import casadi as ca
 from types import SimpleNamespace
 from typing import Tuple, cast
+import pickle
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,8 +24,14 @@ from src.models.agents import (
 )
 from src.models import models
 from src.utils.math_utils import min_max_normalize
+from src.utils.eval_utils import (
+    eval_effectiveness, 
+    eval_kl_divergence, 
+    eval_norm_effectiveness,
+    eval_wasserstein,
+)
 from src.utils.voronoi import (
-    compute_anisotropic_voronoi_partitioning, 
+    compute_anisotropic_voronoi_partitioning,
     agent_fov,
     compute_voronoi_partitioning,
 )
@@ -96,6 +103,8 @@ def create_gaussian_goal_density(
     return density_map
 
 
+
+
 def init_goal_density(map_loader: MapLoader, num_peaks: int = 3) -> GMM:
     """
     Create a simple Gaussian mixture goal density.
@@ -126,7 +135,9 @@ def init_goal_density(map_loader: MapLoader, num_peaks: int = 3) -> GMM:
     # else:
     #     # Fallback to random positions
     # means = np.random.rand(num_peaks, 2) * np.array([width, height])
-    means = 5 + np.random.rand(num_peaks, 2) * np.array([width - 10, height - 10])  # Avoid edges for better visualization
+    means = 5 + np.random.rand(num_peaks, 2) * np.array(
+        [width - 10, height - 10]
+    )  # Avoid edges for better visualization
     # means = np.array([[30, 8], [20, 45], [8, 8]])
     # covariances = 3*np.array([[[10, 0], [0, 10]], [[10, 0], [0, 10]], [[10, 0], [0, 10]]])
 
@@ -144,10 +155,14 @@ def init_goal_density(map_loader: MapLoader, num_peaks: int = 3) -> GMM:
         angle = np.random.rand() * 2 * np.pi
         c, s = np.cos(angle), np.sin(angle)
         R = np.array([[c, -s], [s, c]])
-        scale_x = width / 4 + np.random.rand() * (width / 4)  # Random scale between width/4 and width/2
-        scale_y = height / 4 + np.random.rand() * (height / 4)  # Random scale between height/4 and height/2
-        scale_x /= 2 + 2*np.random.rand()  # Further reduce scale for sharper peaks
-        scale_y /= 2 + 2*np.random.rand()
+        scale_x = width / 4 + np.random.rand() * (
+            width / 4
+        )  # Random scale between width/4 and width/2
+        scale_y = height / 4 + np.random.rand() * (
+            height / 4
+        )  # Random scale between height/4 and height/2
+        scale_x /= 2 + 2 * np.random.rand()  # Further reduce scale for sharper peaks
+        scale_y /= 2 + 2 * np.random.rand()
         S = np.diag([scale_x**2, scale_y**2])
         cov = R @ S @ R.T
         covariances.append(cov)
@@ -156,6 +171,10 @@ def init_goal_density(map_loader: MapLoader, num_peaks: int = 3) -> GMM:
     weights = np.random.dirichlet(np.ones(num_peaks))  # Random weights that sum to 1
     # weights = np.array([0.4, 0.3, 0.3])  # Fixed weights for testing
     gmm = GMM(means=means, covariances=covariances, weights=weights)
+    # results_path = "output/eval"
+    # with open(os.path.join(results_path, "gmm_model.pkl"), "wb") as f:
+    #     pickle.dump(gmm, f)
+    # print("Saved GMM model to: ", os.path.join(results_path, "gmm_model.pkl"))
     return gmm
 
 
@@ -281,6 +300,7 @@ def init_hedac_from_params(params: HEDACParams, config_path: str):
 
     return agent_team, hedac, map_array, goal_density, gmm
 
+
 def init_mpc_from_params(params: HEDACParams, map_array: np.ndarray):
     """
     Init MPC params from params.
@@ -321,13 +341,14 @@ def init_mpc_from_params(params: HEDACParams, map_array: np.ndarray):
     num_obstacles = getattr(params, "num_obstacles", 5)
     mpc_params.obstacles_radius = getattr(params, "obstaclesRadius", 1.0)
     mpc_params.x_obs = np.random.rand(num_obstacles, 2) * np.array([width, height])
+    np.save("output/eval/obstacles.npy", mpc_params.x_obs)
 
     # Create agents
     print(f"Creating {params.num_agents} ground agents...")
     agents = []
-    initial_positions = np.random.rand(params.num_agents, 2) * np.array(
+    initial_positions = (np.random.rand(params.num_agents, 2) + 1) * np.array(
         [width, height]  # [width, height]
-    )
+    ) / 2
 
     model_type = params.get("agents.model_type", "double_integrator")
 
@@ -401,11 +422,12 @@ def init_mpc_from_params(params: HEDACParams, map_array: np.ndarray):
     x0 = ca.SX.sym("x0", mpc_params.nx)
     W = ca.SX.sym("W", LOCAL_GRID_CELLS**2)  # weights
 
-    
     xg = np.linspace(0, width, LOCAL_GRID_CELLS)
     yg = np.linspace(0, height, LOCAL_GRID_CELLS)
     mpc_params.X_mpc, mpc_params.Y_mpc = np.meshgrid(xg, yg)
-    mpc_params.xy_mpc_grid = np.column_stack([mpc_params.X_mpc.ravel(), mpc_params.Y_mpc.ravel()])
+    mpc_params.xy_mpc_grid = np.column_stack(
+        [mpc_params.X_mpc.ravel(), mpc_params.Y_mpc.ravel()]
+    )
     GRID_DM = ca.DM(mpc_params.xy_mpc_grid)
 
     x = x0
@@ -415,7 +437,7 @@ def init_mpc_from_params(params: HEDACParams, map_array: np.ndarray):
         obj += 10*costFunctions.limfov_coverage_cost(
             x, GRID_DM, W, r_max=params.fov_depth, half_fov=half_fov
         )
-        # obj += costFunctions.coverage_cost(x[:2], GRID_DM, W)
+        obj += costFunctions.coverage_cost(x[:2], GRID_DM, W)
         # obj += ca.sumsqr(U[:, k]) * 0.01
         # obj += control_effort_cost(U[:, k].reshape(-1,1), R_u)
         for obs in mpc_params.x_obs:
@@ -502,255 +524,353 @@ if __name__ == "__main__":
         "tab:cyan",
     ]
     cmaps = ["Blues", "Oranges", "Greens", "Reds", "Purples", "Browns"]
-    VIDEO = True
+    VIDEO = False
+    EVAL = True
 
     # Set random seed
     np.random.seed(params.random_seed)
 
-    # Aerial and common params
-    aerial_team, hedac, map_array, target_density, gmm = init_hedac_from_params(
-        params, config_path=args.aerial_config
-    )
-    print_freq_val = params.get("output.print_frequency", 100)
-    print_freq = int(print_freq_val) if print_freq_val is not None else 100
-    verbose = params.get("output.verbose", True)
-
-    # Ground params
-    ground_team, mpc_params, solver = init_mpc_from_params(ground_params, map_array)
-    ground_gp = GaussianProcess(ground_params, map_array.shape)
-    x_lr = np.arange(0, map_array.shape[1], params.resolution)
-    y_lr = np.arange(0, map_array.shape[0], params.resolution)
-    X_lr, Y_lr = np.meshgrid(x_lr, y_lr)
-    xy_lr_grid = np.column_stack([X_lr.flatten(), Y_lr.flatten()])
-    x_hr = np.arange(0, map_array.shape[1], ground_params.resolution)
-    y_hr = np.arange(0, map_array.shape[0], ground_params.resolution)
-    X_hr, Y_hr = np.meshgrid(x_hr, y_hr)
-    xy_hr_grid = np.column_stack([X_hr.flatten(), Y_hr.flatten()])
-    u_prev = np.zeros(
-        (ground_params.num_agents, mpc_params.nu * ground_params.mpc_horizon)
-    )
-    x_mpc = np.linspace(0, map_array.shape[1], ground_params.local_grid_points)
-    y_mpc = np.linspace(0, map_array.shape[0], ground_params.local_grid_points)
-    X_mpc, Y_mpc = np.meshgrid(x_mpc, y_mpc)
-    xy_mpc_grid = np.column_stack([X_mpc.flatten(), Y_mpc.flatten()])
-    ground_target_pdf = gmm.sample_pdf(xy_mpc_grid)
-    ground_target_pdf = min_max_normalize(ground_target_pdf)
-
-    # Visualization
-    if VIDEO:
-        plt.ion()
-        fig, axs = plt.subplots(3, 2, figsize=(12, 18), constrained_layout=True)
-        # fig.tight_layout()
-        for ax in axs.flatten():
-            ax.imshow(
-                np.zeros_like(X_hr), extent=[0, 50, 0, 50], origin="lower", cmap="Greys"
-            )
-
-    for step in range(params.num_steps):
-        if step % print_freq == 0 and verbose:
-            print(f"Step {step + 1}/{params.num_steps}")
-        
-        # Aerial robots step
-        erg_metric = hedac.step(aerial_team, step_num=step)
-        # lr_pred = hedac.gpr_model.predict(xy_lr_grid, return_std=True)
-        # lr_mean, lr_std = cast(Tuple[np.ndarray, np.ndarray], lr_pred)
-        # lr_mean = min_max_normalize(lr_mean)
-        aerial_gp_mean, aerial_gp_std = hedac.gpr_model.predict(xy_mpc_grid, return_std=True)
-        # aerial_gp_mean = min_max_normalize(aerial_gp_mean)
-        # aerial_gp_std = min_max_normalize(aerial_gp_std)
-        # aerial_gp_mean /= np.max(aerial_gp_mean) + 1e-10  # Normalize to [0, 1]
-        aerial_gp_std /= np.max(aerial_gp_std) + 1e-10  # Normalize to [0, 1]
-
-        # Ground robots -- update GP
-        new_observations = ground_gp.collect_observations(ground_team, target_density)
-        ground_gp.update_gp(new_observations, step)
-        ground_gp_mean, ground_gp_std = ground_gp.predict(xy_mpc_grid, return_std=True)
-        # ground_gp_mean = min_max_normalize(ground_gp_mean)
-        # ground_gp_std = min_max_normalize(ground_gp_std)
-        # ground_gp_mean /= (np.max(ground_gp_mean) + 1e-10)
-        ground_gp_std /= (np.max(ground_gp_std) + 1e-10)
-
-        # Ground robots step
-        states = ground_team.get_states()
-        # voronoi_masks = compute_anisotropic_voronoi_partitioning(
-        #     xy_mpc_grid, states[:, :3], 50.0
-        # )
-        voronoi_masks = compute_voronoi_partitioning(
-            xy_mpc_grid, states[:, :2], 50.0
+    if EVAL:
+        cov_metrics = np.zeros((params.num_episodes, params.num_steps))
+        effectiveness_metrics = np.zeros((params.num_episodes, params.num_steps))
+        kl_divergence = np.zeros((params.num_episodes, params.num_steps))
+        wasserstein_d = np.zeros((params.num_episodes,))
+    for ep in range(params.num_episodes):
+        # Aerial and common params
+        aerial_team, hedac, map_array, target_density, gmm = init_hedac_from_params(
+            params, config_path=args.aerial_config
         )
-        
+        print_freq_val = params.get("output.print_frequency", 100)
+        print_freq = int(print_freq_val) if print_freq_val is not None else 100
+        verbose = params.get("output.verbose", True)
 
-        # Get weights and combined density
-        den = 1 / (ground_gp_std + 1e-10) + 1 / (aerial_gp_std + 1e-10)
-        w_a = 1 / (aerial_gp_std + 1e-10) / den                 # weight for aerial GP
-        w_g = 1 / (ground_gp_std + 1e-10) / den                 # weight for ground GP
-        combo_density = w_a * aerial_gp_mean + w_g * ground_gp_mean  # combined density
-        # combo_density = min_max_normalize(combo_density)
-        # print("Combo density stats - min: {:.4f}, max: {:.4f}, mean: {:.4f}".format(
-        #     np.min(combo_density), np.max(combo_density), np.mean(combo_density)
-        # ))
-        # combo_density /= (np.max(combo_density) + 1e-10)  # normalize combined density
-        grid_pts = []
-        weights_list = []
-        for idx, agent in enumerate(ground_team.agents):
-            # weights = ground_target_pdf * voronoi_masks[idx]
-            weights = combo_density * voronoi_masks[idx]
-            # weights = ground_gp_mean * voronoi_masks[idx] 
-            # weights /= (
-            #     np.sum(weights) + 1e-10
-            # )  # Normalize weights for this agent's local grid
-            # weights /= (np.max(weights) + 1e-10)  # Normalize to [0, 1] for better numerical stability
-            weights_list.append(weights)
+        # Ground params
+        ground_team, mpc_params, solver = init_mpc_from_params(ground_params, map_array)
+        ground_gp = GaussianProcess(ground_params, map_array.shape)
+        x_lr = np.arange(0, map_array.shape[1], params.resolution)
+        y_lr = np.arange(0, map_array.shape[0], params.resolution)
+        X_lr, Y_lr = np.meshgrid(x_lr, y_lr)
+        xy_lr_grid = np.column_stack([X_lr.flatten(), Y_lr.flatten()])
+        x_hr = np.arange(0, map_array.shape[1], ground_params.resolution)
+        y_hr = np.arange(0, map_array.shape[0], ground_params.resolution)
+        X_hr, Y_hr = np.meshgrid(x_hr, y_hr)
+        xy_hr_grid = np.column_stack([X_hr.flatten(), Y_hr.flatten()])
+        high_res_target_pdf = gmm.sample_pdf(xy_hr_grid).reshape(X_hr.shape)
+        u_prev = np.zeros(
+            (ground_params.num_agents, mpc_params.nu * ground_params.mpc_horizon)
+        )
+        x_mpc = np.linspace(0, map_array.shape[1], ground_params.local_grid_points)
+        y_mpc = np.linspace(0, map_array.shape[0], ground_params.local_grid_points)
+        X_mpc, Y_mpc = np.meshgrid(x_mpc, y_mpc)
+        xy_mpc_grid = np.column_stack([X_mpc.flatten(), Y_mpc.flatten()])
+        ground_target_pdf = gmm.sample_pdf(xy_mpc_grid)
+        # ground_target_pdf = min_max_normalize(ground_target_pdf)
 
-        for idx, agent in enumerate(ground_team.agents):
-            voronoi_points = xy_mpc_grid[voronoi_masks[idx], :]
-            grid_pts.append(voronoi_points)
 
-        for idx, agent in enumerate(ground_team.agents):
-            # Solve MPC for this agent
-            local_grid = grid_pts[idx]
-            weights = weights_list[idx]
-            x0 = np.hstack([agent.position, agent.theta])
-            p = np.concatenate([x0, weights_list[idx]])
-            u0_guess = u_prev[idx, :].copy()
-            sol = solver(
-                x0=u0_guess,
-                p=p,
-                lbx=mpc_params.lbx,
-                ubx=mpc_params.ubx,
-                lbg=mpc_params.lbg,
-                ubg=mpc_params.ubg,
-            )
-            u_opt = sol["x"].full().reshape(-1, mpc_params.nu)
-            u_prev[idx, :] = sol["x"].full().flatten()  # Store for warm start
-            # print(f"Agent {idx} MPC solution: ", u_opt)
-            v, omega = u_opt[0]
-            agent.step(v, omega)
-
-        if VIDEO or step == params.num_steps - 1:
-            if not VIDEO:
-                fig, axs = plt.subplots(3, 2, figsize=(12, 18), constrained_layout=True)
-                # fig.tight_layout()
-            # -------------- Visualization --------------
-            # Clear axes
+        # Visualization
+        if VIDEO:
+            plt.ion()
+            fig, axs = plt.subplots(3, 2, figsize=(12, 18), constrained_layout=True)
+            # fig.tight_layout()
             for ax in axs.flatten():
-                ax.clear()
-            
-            # Target and combo density
-            axs[0, 0].imshow(
-                target_density.reshape(X_lr.shape),
-                extent=[0, map_array.shape[1], 0, map_array.shape[0]],
-                origin="lower", 
-                cmap="RdPu",
-                vmin=0,
-                vmax=1
+                ax.imshow(
+                    np.zeros_like(X_hr),
+                    extent=[0, 50, 0, 50],
+                    origin="lower",
+                    cmap="Greys",
+                )
+
+        for step in range(params.num_steps):
+            if step % print_freq == 0 and verbose:
+                print(f"Step {step + 1}/{params.num_steps}")
+
+            # Aerial robots step
+            erg_metric = hedac.step(aerial_team, step_num=step)
+            # lr_pred = hedac.gpr_model.predict(xy_lr_grid, return_std=True)
+            # lr_mean, lr_std = cast(Tuple[np.ndarray, np.ndarray], lr_pred)
+            # lr_mean = min_max_normalize(lr_mean)
+            aerial_gp_mean, aerial_gp_std = hedac.gpr_model.predict(
+                xy_mpc_grid, return_std=True
             )
-            axs[0, 0].set_title("Target Density")
-            axs[0, 1].imshow(
-                combo_density.reshape(X_mpc.shape),
-                extent=[0, map_array.shape[1], 0, map_array.shape[0]],
-                origin="lower",
-                cmap="RdPu",
-                vmin=0,
-                vmax=1
+            # aerial_gp_mean = min_max_normalize(aerial_gp_mean)
+            # aerial_gp_std = min_max_normalize(aerial_gp_std)
+            # aerial_gp_mean /= np.max(aerial_gp_mean) + 1e-10  # Normalize to [0, 1]
+            aerial_gp_std /= np.max(aerial_gp_std) + 1e-10  # Normalize to [0, 1]
+
+            # Ground robots -- update GP
+            new_observations = ground_gp.collect_observations(
+                ground_team, target_density
             )
-            axs[0, 1].set_title("Combined Density")
-            
-            # Aerial GP mean and std
-            axs[1, 0].imshow(
-                aerial_gp_mean.reshape(X_mpc.shape), 
-                extent=[0, map_array.shape[1], 0, map_array.shape[0]], 
-                origin="lower", 
-                cmap="RdPu",
-                vmin=0,
-                vmax=1
+            ground_gp.update_gp(new_observations, step)
+            ground_gp_mean, ground_gp_std = ground_gp.predict(
+                xy_mpc_grid, return_std=True
             )
-            # axs[1, 0].scatter(
-            #     hedac.dataset[:, 0], hedac.dataset[:, 1], c=hedac.dataset[:, 2], s=5, alpha=0.3
+            # ground_gp_mean = min_max_normalize(ground_gp_mean)
+            # ground_gp_std = min_max_normalize(ground_gp_std)
+            # ground_gp_mean /= (np.max(ground_gp_mean) + 1e-10)
+            ground_gp_std /= np.max(ground_gp_std) + 1e-10
+
+            # Ground robots step
+            states = ground_team.get_states()
+            # voronoi_masks = compute_anisotropic_voronoi_partitioning(
+            #     xy_mpc_grid, states[:, :3], 50.0
             # )
-            axs[1, 0].set_title("Aerial GP Mean")
-            axs[1, 1].imshow(
-                aerial_gp_std.reshape(X_mpc.shape), 
-                extent=[0, map_array.shape[1], 0, map_array.shape[0]], 
-                origin="lower", 
-                cmap="Greys",
-                vmin=0,
-                vmax=1
+            voronoi_masks = compute_voronoi_partitioning(
+                xy_mpc_grid, states[:, :2], 50.0
             )
-            axs[1, 1].set_title("Aerial GP Std Dev")
 
-            # Ground GP mean and std
-            axs[2, 0].imshow(
-                ground_gp_mean.reshape(X_mpc.shape), 
-                extent=[0, map_array.shape[1], 0, map_array.shape[0]], 
-                origin="lower", 
-                cmap="RdPu",
-                vmin=0,
-                vmax=1
-            )
-            axs[2, 0].set_title("Ground GP Mean")
-            axs[2, 1].imshow(
-                ground_gp_std.reshape(X_mpc.shape), 
-                extent=[0, map_array.shape[1], 0, map_array.shape[0]], 
-                origin="lower", 
-                cmap="Greys",
-                vmin=0,
-                vmax=1
-            )
-            axs[2, 1].set_title("Ground GP Std Dev")
-
-            # Obstacles
-            for ax in axs.flatten():
-                for obs in mpc_params.x_obs:
-                    circle = plt.Circle(
-                        obs, mpc_params.obstacles_radius, color="k", alpha=0.5
-                    )
-                    ax.add_patch(circle)
-
-            # Ground robots
+            # Get weights and combined density
+            den = 1 / (ground_gp_std + 1e-10) + 1 / (aerial_gp_std + 1e-10)
+            w_a = 1 / (aerial_gp_std + 1e-10) / den  # weight for aerial GP
+            w_g = 1 / (ground_gp_std + 1e-10) / den  # weight for ground GP
+            combo_density = (
+                w_a * aerial_gp_mean + w_g * ground_gp_mean
+            )  # combined density
+            # combo_density -= np.min(combo_density)  # Shift to make non-negative
+            # combo_density = min_max_normalize(combo_density)
+            # print("Combo density stats - min: {:.4f}, max: {:.4f}, mean: {:.4f}".format(
+            #     np.min(combo_density), np.max(combo_density), np.mean(combo_density)
+            # ))
+            # combo_density /= (np.max(combo_density) + 1e-10)  # normalize combined density
+            grid_pts = []
+            weights_list = []
             for idx, agent in enumerate(ground_team.agents):
+                # weights = ground_target_pdf * voronoi_masks[idx]
+                weights = combo_density * voronoi_masks[idx]
+                # weights = ground_gp_mean * voronoi_masks[idx]
+                # weights /= (
+                #     np.sum(weights) + 1e-10
+                # )  # Normalize weights for this agent's local grid
+                # weights /= (np.max(weights) + 1e-10)  # Normalize to [0, 1] for better numerical stability
+                weights_list.append(weights)
+
+            for idx, agent in enumerate(ground_team.agents):
+                voronoi_points = xy_mpc_grid[voronoi_masks[idx], :]
+                grid_pts.append(voronoi_points)
+
+            for idx, agent in enumerate(ground_team.agents):
+                # Solve MPC for this agent
                 local_grid = grid_pts[idx]
                 weights = weights_list[idx]
-                # top_indices = np.argsort(weights)[-100:]  # Get top 100 points for visualization
-                # top_grid_points = xy_mpc_grid[top_indices]
-                # top_weights = weights[top_indices]
+                x0 = np.hstack([agent.position, agent.theta])
+                p = np.concatenate([x0, weights_list[idx]])
+                u0_guess = u_prev[idx, :].copy()
+                sol = solver(
+                    x0=u0_guess,
+                    p=p,
+                    lbx=mpc_params.lbx,
+                    ubx=mpc_params.ubx,
+                    lbg=mpc_params.lbg,
+                    ubg=mpc_params.ubg,
+                )
+                u_opt = sol["x"].full().reshape(-1, mpc_params.nu)
+                u_prev[idx, :] = sol["x"].full().flatten()  # Store for warm start
+                # print(f"Agent {idx} MPC solution: ", u_opt)
+                v, omega = u_opt[0]
+                agent.step(v, omega)
+            
+            # Evaluation
+            
+            if EVAL:
+                ground_states = ground_team.get_states()
+                effectiveness = eval_norm_effectiveness(
+                    ground_states,
+                    xy_hr_grid,
+                    high_res_target_pdf,
+                    fov_degrees=ground_params.fov_deg,
+                    robot_range=ground_params.sens_range,
+                    env_area=map_array.shape[0] * map_array.shape[1],
+                )
+                effectiveness_metrics[ep, step] = effectiveness
+                kl_divergence[ep, step] = eval_kl_divergence(ground_target_pdf, combo_density)
+            # print(f"Step {step + 1} - Effectiveness: {effectiveness:.4f}, KL Divergence: {kl_divergence[ep, step]:.4f}")
+            if VIDEO:
+                # if not VIDEO:
+                #     fig, axs = plt.subplots(
+                #         3, 2, figsize=(12, 18), constrained_layout=True
+                #     )
+                    # fig.tight_layout()
+                # -------------- Visualization --------------
+                # Clear axes
                 for ax in axs.flatten():
-                    ax.plot(
-                        agent.position[0], agent.position[1], marker="o", color=colors[idx]
-                    )
-                    state = np.hstack([agent.position, agent.theta])
-                    fov_lines = agent_fov(
-                        state, ground_params.fov_depth, np.deg2rad(ground_params.fov_deg)
-                    )
-                    ax.plot(fov_lines[:, 0], fov_lines[:, 1], color=colors[idx], alpha=0.5)
-                    ax.plot(agent.x_hist[:, 0], agent.x_hist[:, 1], color=colors[idx], alpha=0.7)
-                    # ax.scatter(top_grid_points[:, 0], top_grid_points[:, 1], c=top_weights, cmap=cmaps[idx], s=10, alpha=0.5)
-                    # ax.scatter(
-                    #     local_grid[:, 0], local_grid[:, 1], c=colors[idx], s=5, alpha=0.3
-                    # )
+                    ax.clear()
 
-            # Aerial robots
-            for idx, agent in enumerate(aerial_team.agents):
+                # Target and combo density
+                axs[0, 0].imshow(
+                    target_density.reshape(X_lr.shape),
+                    extent=[0, map_array.shape[1], 0, map_array.shape[0]],
+                    origin="lower",
+                    cmap="RdPu",
+                    vmin=0,
+                    vmax=1,
+                )
+                axs[0, 0].set_title("Target Density")
+                axs[0, 1].imshow(
+                    combo_density.reshape(X_mpc.shape),
+                    extent=[0, map_array.shape[1], 0, map_array.shape[0]],
+                    origin="lower",
+                    cmap="RdPu",
+                    vmin=0,
+                    vmax=1,
+                )
+                axs[0, 1].set_title("Combined Density")
+
+                # Aerial GP mean and std
+                axs[1, 0].imshow(
+                    aerial_gp_mean.reshape(X_mpc.shape),
+                    extent=[0, map_array.shape[1], 0, map_array.shape[0]],
+                    origin="lower",
+                    cmap="RdPu",
+                    vmin=0,
+                    vmax=1,
+                )
+                # axs[1, 0].scatter(
+                #     hedac.dataset[:, 0], hedac.dataset[:, 1], c=hedac.dataset[:, 2], s=5, alpha=0.3
+                # )
+                axs[1, 0].set_title("Aerial GP Mean")
+                axs[1, 1].imshow(
+                    aerial_gp_std.reshape(X_mpc.shape),
+                    extent=[0, map_array.shape[1], 0, map_array.shape[0]],
+                    origin="lower",
+                    cmap="Greys",
+                    vmin=0,
+                    vmax=1,
+                )
+                axs[1, 1].set_title("Aerial GP Std Dev")
+
+                # Ground GP mean and std
+                axs[2, 0].imshow(
+                    ground_gp_mean.reshape(X_mpc.shape),
+                    extent=[0, map_array.shape[1], 0, map_array.shape[0]],
+                    origin="lower",
+                    cmap="RdPu",
+                    vmin=0,
+                    vmax=1,
+                )
+                axs[2, 0].set_title("Ground GP Mean")
+                axs[2, 1].imshow(
+                    ground_gp_std.reshape(X_mpc.shape),
+                    extent=[0, map_array.shape[1], 0, map_array.shape[0]],
+                    origin="lower",
+                    cmap="Greys",
+                    vmin=0,
+                    vmax=1,
+                )
+                axs[2, 1].set_title("Ground GP Std Dev")
+
+                # Obstacles
                 for ax in axs.flatten():
-                    ax.scatter(
-                        agent.position[0], agent.position[1], marker="x", color=colors[idx]
-                    )
-                    state = np.hstack([agent.position, agent.theta])
-                    fov_lines = agent_fov(
-                        state, params.fov_depth, np.deg2rad(params.fov_deg), num_points=30
-                    )
-                    ax.plot(fov_lines[:, 0], fov_lines[:, 1], color=colors[idx], alpha=0.5)
-                    ax.set_xlim(0, map_array.shape[1])
-                    ax.set_ylim(0, map_array.shape[0])
-            # ----------------- End Visualization ----------------
+                    for obs in mpc_params.x_obs:
+                        circle = plt.Circle(
+                            obs, mpc_params.obstacles_radius, color="k", alpha=0.5
+                        )
+                        ax.add_patch(circle)
 
-            plt.pause(0.01)
+                # Ground robots
+                for idx, agent in enumerate(ground_team.agents):
+                    local_grid = grid_pts[idx]
+                    weights = weights_list[idx]
+                    # top_indices = np.argsort(weights)[-100:]  # Get top 100 points for visualization
+                    # top_grid_points = xy_mpc_grid[top_indices]
+                    # top_weights = weights[top_indices]
+                    for ax in axs.flatten():
+                        ax.plot(
+                            agent.position[0],
+                            agent.position[1],
+                            marker="o",
+                            color=colors[idx],
+                        )
+                        state = np.hstack([agent.position, agent.theta])
+                        fov_lines = agent_fov(
+                            state,
+                            ground_params.fov_depth,
+                            np.deg2rad(ground_params.fov_deg),
+                        )
+                        ax.plot(
+                            fov_lines[:, 0],
+                            fov_lines[:, 1],
+                            color=colors[idx],
+                            alpha=0.5,
+                        )
+                        ax.plot(
+                            agent.x_hist[:, 0],
+                            agent.x_hist[:, 1],
+                            color=colors[idx],
+                            alpha=0.7,
+                        )
+                        # ax.scatter(top_grid_points[:, 0], top_grid_points[:, 1], c=top_weights, cmap=cmaps[idx], s=10, alpha=0.5)
+                        # ax.scatter(
+                        #     local_grid[:, 0], local_grid[:, 1], c=colors[idx], s=5, alpha=0.3
+                        # )
+
+                # Aerial robots
+                for idx, agent in enumerate(aerial_team.agents):
+                    for ax in axs.flatten():
+                        ax.scatter(
+                            agent.position[0],
+                            agent.position[1],
+                            marker="x",
+                            color=colors[idx],
+                        )
+                        state = np.hstack([agent.position, agent.theta])
+                        fov_lines = agent_fov(
+                            state,
+                            params.fov_depth,
+                            np.deg2rad(params.fov_deg),
+                            num_points=30,
+                        )
+                        ax.plot(
+                            fov_lines[:, 0],
+                            fov_lines[:, 1],
+                            color=colors[idx],
+                            alpha=0.5,
+                        )
+                        ax.set_xlim(0, map_array.shape[1])
+                        ax.set_ylim(0, map_array.shape[0])
+                # ----------------- End Visualization ----------------
+
+                plt.pause(0.01)
         
+        if EVAL:
+            w_dist = eval_wasserstein(ground_target_pdf, combo_density)
+            wasserstein_d[ep] = w_dist
+            print(f"Episode {ep + 1} | final KL divergence: {kl_divergence[ep, -1]:.4f} | Final norm effectiveness: {effectiveness_metrics[ep, -1]:.4f}")
+            print(f"final Wasserstein distance: {w_dist:.4f}")
+    if EVAL:
+        results_path = "output/eval"
+        np.save(
+            os.path.join(results_path, "effectiveness_metrics.npy"),
+            effectiveness_metrics,
+        )
+        np.save(
+            os.path.join(results_path, "kl_divergence.npy"),
+            kl_divergence
+        )
+        np.save(
+            os.path.join(results_path, "wasserstein_distance.npy"),
+            wasserstein_d
+        )
+        # traj_all = [agent.trajectory for agent in ground_team.agents]
+        # traj_all = np.array(traj_all)
+        # # Save trajectories
+        # np.save(
+        #     os.path.join(results_path, "ground_trajectories.npy"),
+        #     traj_all
+        # )
+
+        # Save target and final combined density
+        # np.save(
+        #     os.path.join(results_path, "target_density.npy"),
+        #     target_density.reshape(X_lr.shape)
+        # )
+        # np.save(
+        #     os.path.join(results_path, "final_combined_density.npy"),
+        #     combo_density.reshape(X_mpc.shape)
+        # )
 
     if VIDEO:
         plt.ioff()
-    
-    plt.show()
+        plt.show()
 
     # Plot results
     # if not args.no_plot:

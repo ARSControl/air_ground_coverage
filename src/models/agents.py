@@ -638,6 +638,291 @@ class DubinsAgent:
         self.heading = state.heading
 
 
+class UnicycleAgent:
+    """
+    Unicycle model (differential drive) with variable velocity and turn rate.
+
+    State: [x, y, theta]
+    - Position (x, y)
+    - Heading theta
+
+    Dynamics:
+    x_dot = v * cos(theta)
+    y_dot = v * sin(theta)
+    theta_dot = omega
+
+    Control: [v, omega]
+    - Linear velocity v
+    - Angular velocity omega
+    """
+
+    def __init__(
+        self,
+        x0: np.ndarray,
+        theta0: float,
+        max_v: float = 5.0,
+        max_omega: float = np.pi / 2,
+        dt: float = 0.1,
+        agent_id: int = 0,
+        observations_range: int = 10,
+        observations_count: int = 10,
+        sens_range: float = 10.0,
+        fov_degrees: float = 360.0,
+    ):
+        """
+        Initialize unicycle agent.
+
+        Args:
+            x0: Initial position [x, y]
+            theta0: Initial heading in radians
+            max_v: Maximum linear velocity
+            max_omega: Maximum angular velocity (rad/s)
+            dt: Time step
+            agent_id: Unique identifier
+            observations_range: Range of observations
+            observations_count: Number of observations to take at each sensing step
+            sens_range: Sensing range for the agent (used for neighbor detection)
+        """
+        self.id = agent_id
+        self.position = np.array(x0, dtype=float)
+        self.heading = theta0
+        self.max_v = float(max_v)
+        self.max_omega = float(max_omega)
+        self.dt = dt
+
+        # History
+        self.position_history: List[NDArray[np.float64]] = [self.position.copy()]
+        self.heading_history: List[float] = [self.heading]
+
+        # Sensing
+        self.sens_range = sens_range
+        self.fov_angle = np.deg2rad(fov_degrees)
+        self.fov_edges: Optional[np.ndarray] = None
+        self.neighbors: List[int] = []
+        self.observations_history: NDArray[np.float64] = np.empty((0, 2))
+        self._observations_count = observations_count
+        self._observations_range = observations_range
+
+        # GP observation storage
+        self.all_observations: NDArray[np.float64] = np.empty((0, 3))
+
+        # Internal state
+        self.grad: NDArray[np.float64] = np.zeros(2)
+
+    @property
+    def x(self) -> np.ndarray:
+        """Current position."""
+        return self.position
+
+    @property
+    def theta(self) -> float:
+        """Current heading."""
+        return self.heading
+
+    @property
+    def x_hist(self) -> np.ndarray:
+        """Position history as array."""
+        return np.array(self.position_history)
+
+    @property
+    def trajectory(self) -> np.ndarray:
+        """Full trajectory (position and heading) history."""
+        return np.array(
+            [
+                [pos[0], pos[1], head]
+                for pos, head in zip(self.position_history, self.heading_history)
+            ]
+        )
+
+    @property
+    def observations_count(self) -> int:
+        """Number of observations to take at each sensing step."""
+        return self._observations_count
+
+    @observations_count.setter
+    def observations_count(self, count: int):
+        """Set the number of observations to take at each sensing step."""
+        self._observations_count = count
+
+    @property
+    def observations_range(self) -> int:
+        """Range of observations."""
+        return self._observations_range
+
+    @observations_range.setter
+    def observations_range(self, obs_range: int):
+        """Set the range of observations."""
+        self._observations_range = obs_range
+
+    def step(self, v: float, omega: float):
+        """
+        Update agent state with velocity commands.
+
+        Args:
+            v: Linear velocity
+            omega: Angular velocity
+        """
+        # Clip velocities
+        v = np.clip(v, -self.max_v, self.max_v)
+        omega = np.clip(omega, -self.max_omega, self.max_omega)
+
+        # Update heading
+        self.heading += omega * self.dt
+        self.heading = np.arctan2(np.sin(self.heading), np.cos(self.heading))
+
+        # Update position using unicycle dynamics
+        self.position[0] += v * np.cos(self.heading) * self.dt
+        self.position[1] += v * np.sin(self.heading) * self.dt
+
+        self.position_history.append(self.position.copy())
+        self.heading_history.append(self.heading)
+
+    def clip_position(self, x_min: float, x_max: float, y_min: float, y_max: float):
+        """
+        Clip agent position to stay within map boundaries.
+
+        Args:
+            x_min: Minimum x coordinate
+            x_max: Maximum x coordinate
+            y_min: Minimum y coordinate
+            y_max: Maximum y coordinate
+        """
+        self.position[0] = np.clip(self.position[0], x_min, x_max)
+        self.position[1] = np.clip(self.position[1], y_min, y_max)
+
+    def track_velocity_and_heading(
+        self,
+        target_velocity: np.ndarray,
+        target_heading: float,
+        penalize_lateral: bool = True,
+    ):
+        """
+        Track target velocity and heading.
+
+        Args:
+            target_velocity: Desired velocity vector [vx, vy]
+            target_heading: Desired heading angle
+            penalize_lateral: Whether to penalize lateral velocity (unused for unicycle)
+        """
+        # Compute target velocity magnitude
+        v_target = np.linalg.norm(target_velocity)
+        if v_target > self.max_v:
+            v_target = self.max_v
+
+        # Compute heading error
+        if np.linalg.norm(target_velocity) > 1e-10:
+            target_heading = np.arctan2(target_velocity[1], target_velocity[0])
+
+        heading_error = target_heading - self.heading
+        heading_error = np.arctan2(np.sin(heading_error), np.cos(heading_error))
+
+        # Simple proportional control
+        k_p_omega = 2.0
+        omega = np.clip(k_p_omega * heading_error, -self.max_omega, self.max_omega)
+
+        self.step(v_target, omega)
+
+    def sense_environment(self) -> np.ndarray:
+        """
+        Sense the environment within the sensing range.
+
+        Returns:
+            Array of sensed points (shape: [n_points, 2])
+        """
+        angles = np.linspace(0, 2 * np.pi, self.observations_count, endpoint=False)
+        distances = np.random.uniform(
+            0, self.observations_range, size=self.observations_count
+        )
+        obs_x = self.position[0] + distances * np.cos(angles)
+        obs_y = self.position[1] + distances * np.sin(angles)
+        obs = np.column_stack((obs_x, obs_y))
+        self.observations_history = np.vstack((self.observations_history, obs))
+        return obs
+
+    def sense_environment_gp(
+        self,
+        true_density_map: np.ndarray,
+        noise_std: float = 0.05,
+        n_samples: Optional[int] = None,
+        max_resample: int = 50,
+    ) -> np.ndarray:
+        """
+        Sample observations from the true density map with noise,
+        restricted to an angular field of view centered at self.heading.
+
+        Args:
+            true_density_map: Ground truth density map (H, W)
+            noise_std: Standard deviation of Gaussian observation noise
+            n_samples: Number of samples per step (defaults to observations_count)
+            max_resample: Max attempts to keep samples within bounds
+
+        Returns:
+            observations: (N, 3) array [x, y, noisy_value]
+        """
+        if n_samples is None:
+            n_samples = self.observations_count
+
+        height, width = true_density_map.shape
+
+        # Angular sector centered at current heading
+        half_fov = self.fov_angle / 2.0
+        angles = np.linspace(
+            self.heading - half_fov,
+            self.heading + half_fov,
+            n_samples,
+            endpoint=False,
+        )
+
+        # Random radial distances
+        distances = np.random.uniform(0, self.observations_range, size=n_samples)
+
+        obs = []
+        for angle, dist in zip(angles, distances):
+            x = self.position[0] + dist * np.cos(angle)
+            y = self.position[1] + dist * np.sin(angle)
+
+            attempts = 0
+            while (
+                (x < 0 or x >= width or y < 0 or y >= height)
+                and attempts < max_resample
+            ):
+                dist = np.random.uniform(0, self.observations_range)
+                x = self.position[0] + dist * np.cos(angle)
+                y = self.position[1] + dist * np.sin(angle)
+                attempts += 1
+
+            x = np.clip(x, 0, width - 1)
+            y = np.clip(y, 0, height - 1)
+
+            value = true_density_map[int(round(y)), int(round(x))]
+            noisy_value = value + np.random.normal(0.0, noise_std)
+            obs.append([x, y, noisy_value])
+
+        observations = np.array(obs, dtype=float)
+
+        if observations.size > 0:
+            self.all_observations = np.vstack((self.all_observations, observations))
+
+        return observations
+
+    def get_state(self) -> AgentState:
+        """Get current state."""
+        velocity = np.array(
+            [self.max_v * np.cos(self.heading), self.max_v * np.sin(self.heading)]
+        )
+        return AgentState(
+            position=self.position.copy(),
+            velocity=velocity,
+            heading=self.heading,
+            angular_velocity=0.0,
+        )
+
+    def set_state(self, state: AgentState):
+        """Set current state."""
+        self.position = state.position.copy()
+        self.heading = state.heading
+
+
 class AgentTeam:
     """Team of agents."""
 
@@ -680,6 +965,10 @@ class AgentTeam:
     def get_positions(self) -> np.ndarray:
         """Get all agent positions."""
         return np.array([agent.position for agent in self.agents])
+
+    def get_states(self) -> np.ndarray:
+        """Get all agent states as array."""
+        return np.array([agent.get_state().to_array() for agent in self.agents])
 
     def get_histories(self) -> List[np.ndarray]:
         """Get position histories for all agents."""

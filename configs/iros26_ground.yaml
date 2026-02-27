@@ -2,12 +2,12 @@
 # This file defines the structure and defaults for ground robots parameters
 
 simulation:
-  num_agents: 3
-  num_obstacles: 0
+  num_agents: 7
+  num_obstacles: 5
   obstacles_radius: 1.0
 
 mpc:
-  horizon: 5  # MPC horizon length
+  horizon: 2  # MPC horizon length
   max_iterations: 300  # Max iterations for MPC solver
   print_time: False  # Whether to print MPC solve time
   tolerance: 1e-4  # Convergence tolerance for MPC solver
@@ -15,10 +15,10 @@ mpc:
 # Agent Parameters
 agents:
   model_type: "unicycle"  # Options: "double_integrator", "unicycle"
-  max_velocity: 5            # Maximum velocity
-  max_acceleration: 3        # Maximum acceleration
-  max_angular_velocity: 4  # Maximum angular velocity (rad/s) = pi/4
-  max_angular_acceleration: 2  # Maximum angular acceleration (rad/s^2) = pi/8
+  max_velocity: 4            # Maximum velocity
+  max_acceleration: 2.5        # Maximum acceleration
+  max_angular_velocity: 5  # Maximum angular velocity (rad/s) = pi/4
+  max_angular_acceleration: 3  # Maximum angular acceleration (rad/s^2) = pi/8
   dt_agent: 0.1                # Agent time step
   agent_radius: 5.0            # Agent radius for coverage block
   min_kernel_val: 0.000001         # Minimum kernel value threshold
@@ -31,7 +31,7 @@ agents:
 # Sensor/FOV Parameters
 sensor:
   fov_degrees: 90.0            # Field of view angle in degrees
-  fov_depth: 10.0               # Field of view depth
+  fov_depth: 5.0               # Field of view depth
 
 # Multi-Agent Parameters
 multi_agent:

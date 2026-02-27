@@ -3,10 +3,11 @@
 
 # Simulation Parameters
 simulation:
-  num_steps: 2000              # Number of simulation steps
-  num_agents: 1                # Number of agents
+  num_steps: 300              # Number of simulation steps
+  num_agents: 3                # Number of agents
   dt: 0.1                      # Time step for heat equation
   random_seed: 42              # Random seed for reproducibility
+  num_episodes: 10          # Number of episodes to run (for evaluation)
 
 # Heat Equation Parameters
 heat_equation:
@@ -30,7 +31,7 @@ agents:
 
   dubins:
     forward_speed: 10.0          # Constant forward speed (m/s)
-    max_bank_angle: 30.0        # Maximum bank angle (deg)
+    max_bank_angle: 60.0        # Maximum bank angle (deg)
 
 # Sensor/FOV Parameters
 sensor:
@@ -45,9 +46,9 @@ multi_agent:
 gpr:
   sigma_f: 1.0                 # Signal variance for RBF kernel
   length_scale: 1.0            # Length scale for RBF kernel
-  noise_level: 0.1             # Noise level for GP
+  noise_level: 0.2             # Noise level for GP
   gamma: 0                      # Exploration-exploitation balance
-  obs_noise_std: 0.1          # Std of observation noise
+  obs_noise_std: 0.2          # Std of observation noise
   obs_per_step: 10             # Observations per step per agent
   min_samples: 10              # Min samples before GP prediction
   use_filter: true             # Enable uncertainty-based filtering
@@ -55,7 +56,7 @@ gpr:
   remove_threshold: -1       # Remove obs if uncertainty < threshold
   max_dataset_size: 500        # Cap dataset size (latest retained)
   fit_hyperparams: true        # Enable hyperparameter optimization
-  fit_interval: 20             # Fit at most every N steps (0 = every update)
+  fit_interval: 10             # Fit at most every N steps (0 = every update)
 
 # Map Parameters
 map:

@@ -41,6 +41,7 @@ class HEDACParams:
         self.obstacles_radius = sim.get("obstacles_radius", 1.0)
         self.dt = sim.get("dt", 0.1)
         self.random_seed = sim.get("random_seed", 42)
+        self.num_episodes = sim.get("num_episodes", 1)
 
         # Heat equation parameters
         self.heat_equation = config.get("heat_equation", {})
