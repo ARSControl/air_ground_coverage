@@ -238,6 +238,8 @@ if __name__ == "__main__":
     ax3.set_xlabel("x"); ax3.set_ylabel("y")
     ax3.legend(fontsize=6)
 
+    import os
+    os.makedirs("output", exist_ok=True)
     plt.tight_layout()
     plt.savefig("output/trajectories.png", dpi=150)
     plt.show()
