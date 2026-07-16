@@ -234,7 +234,7 @@ if __name__ == "__main__":
                  label=f"A{i}", alpha=0.5)
         ax3.scatter(aerial_traj[0, i, 0], aerial_traj[0, i, 1], marker="s", s=40)
         ax3.scatter(aerial_traj[-1, i, 0], aerial_traj[-1, i, 1], marker="*", s=60)
-    ax3.set_title("Traiettorie su densità")
+    ax3.set_title("Trajectories over Density")
     ax3.set_xlabel("x"); ax3.set_ylabel("y")
     ax3.legend(fontsize=6)
 
