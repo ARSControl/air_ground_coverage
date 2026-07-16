@@ -28,12 +28,12 @@ def normalize_density(phi, cell_area):
 
 # ----------------------------- Voronoi utilities -----------------------------
 
-def assign_voronoi(grid_points, agent_positions, sensing_range=None, agent_ref=None):
+def assign_voronoi(grid_points, agent_positions, sensing_range=None):
     """
-    Assigns each grid point to the closest agent (Voronoi partition).
-    If sensing_range is given, points farther than range from an agent's
-    *reference* position (agent_ref, e.g. ground robot itself) are masked out
-    per-agent to emulate range-limited sensing.
+    Assign each grid point to the closest agent (Voronoi partition).
+
+    If sensing_range is given, points whose closest agent is farther than
+    sensing_range are masked out to emulate range-limited sensing.
     """
     d = np.linalg.norm(grid_points[:, None, :] - agent_positions[None, :, :], axis=2)
     labels = np.argmin(d, axis=1)
