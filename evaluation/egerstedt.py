@@ -109,7 +109,7 @@ def heterogeneous_step(ground_pos, ground_centroids, aerial_pos, aerial_centroid
 
 # ----------------------------- Simulation -----------------------------
 
-def run_simulation(scenario="proposed", N=5, K=4, iterations=400,
+def run_simulation(scenario="rudolph", N=5, K=4, iterations=400,
                     sensing_range=0.8, domain_size=10, seed=0, num_peaks=2):
     rng = np.random.default_rng(seed)
     ground_domain = Domain(0, domain_size, 0, domain_size, grid_res=90)
@@ -164,7 +164,7 @@ if __name__ == "__main__":
     results = {}
     ground_sensing = 0.8
     aerial_sensing = 2 * ground_sensing
-    for scen in ["proposed"]:
+    for scen in ["rudolph"]:
         cost, traj, aerial_traj, domain, phi = run_simulation(
             scenario=scen, iterations=iterations, sensing_range=ground_sensing,
             num_peaks=1
