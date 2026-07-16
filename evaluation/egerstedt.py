@@ -11,7 +11,9 @@ class Domain:
         ys = np.linspace(ymin, ymax, grid_res)
         X, Y = np.meshgrid(xs, ys)
         self.grid = np.stack([X.ravel(), Y.ravel()], axis=1)
-        self.cell_area = ((xmax - xmin) / grid_res) * ((ymax - ymin) / grid_res)
+        dx = (xmax - xmin) / (grid_res - 1)
+        dy = (ymax - ymin) / (grid_res - 1)
+        self.cell_area = dx * dy
 
 def bivariate_gaussian_density(points, means, cov):
     """phi^G(q): sum of Gaussians, later normalized to a probability density."""
