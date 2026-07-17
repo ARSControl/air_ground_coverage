@@ -105,9 +105,9 @@ posterior, aerial target density, and subsequent aerial command or trajectory.
 
 ## Documentation
 
-- [Mathematical formulation](docs/mathematical_formulation.md): implemented
-  equations for the fields, sensors, multi-fidelity GP, densities, controllers,
-  dynamics, scheduling, and metrics, with an equation-to-code map.
+ equations for the fields, sensors, multi-fidelity GP, densities, controllers,
+ dynamics, scheduling, and metrics, with an equation-to-code map.
+- [Mathematical formulation (PDF)](https://arscontrol.github.io/air_ground_coverage/mathematical_formulation.pdf): typeset implemented equations for the fields, sensors, multi-fidelity GP, densities, controllers, dynamics, scheduling, and metrics. The [source and build details](docs/mathematical_formulation.md) remain in the repository.
 - [Multi-fidelity configuration reference](docs/multifidelity_config_reference.md):
   detailed documentation for every parameter in the canonical configuration.
 

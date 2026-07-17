@@ -1,0 +1,73 @@
+name: Build mathematical formulation PDF
+
+on:
+  pull_request:
+    paths:
+      - "docs/latex/**"
+      - ".github/workflows/mathematical-formulation-pdf.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/latex/**"
+      - ".github/workflows/mathematical-formulation-pdf.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mathematical-formulation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Compile PDF
+        uses: xu-cheng/latex-action@v3
+        with:
+          root_file: mathematical_formulation.tex
+          working_directory: docs/latex
+          args: -pdf -file-line-error -halt-on-error -interaction=nonstopmode
+
+      - name: Upload compiled PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: mathematical-formulation-pdf
+          path: docs/latex/mathematical_formulation.pdf
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Download compiled PDF
+        uses: actions/download-artifact@v4
+        with:
+          name: mathematical-formulation-pdf
+          path: site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
