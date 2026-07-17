@@ -34,7 +34,7 @@ The main symbols are:
 | $w_j$ | Numerical quadrature weight associated with query point $\mathbf q_j$ |
 | $V_{ij}$ | Indicator that query point $j$ belongs to robot $i$'s Voronoi cell |
 | $\Delta t$ | Simulation or controller time step |
-| $\operatorname{sat}_{[a,b]}(z)$ | Clipping of $z$ to the interval $[a,b]$ |
+| $\mathrm{sat}_{[a,b]}(z)$ | Clipping of $z$ to the interval $[a,b]$ |
 
 Unless stated otherwise, the current multi-fidelity path uses one central
 posterior for both teams:
@@ -626,9 +626,9 @@ $$
 g_{\mathrm{rms}}
 =
 \sqrt{
-\operatorname{mean}(T_x^2)
+\mathrm{mean}(T_x^2)
 +
-\operatorname{mean}(T_y^2)
+\mathrm{mean}(T_y^2)
 },
 $$
 
@@ -654,7 +654,7 @@ The target velocity and heading are
 $$
 \mathbf v_i^\star=v_{\max}\mathbf d_i,
 \qquad
-\theta_i^\star=\operatorname{atan2}(d_{i,y},d_{i,x}).
+\theta_i^\star=\mathrm{atan2}(d_{i,y},d_{i,x}).
 $$
 
 ## 7. Robot dynamics
@@ -684,7 +684,7 @@ The HEDAC heading tracker uses
 $$
 e_{\theta,i}
 =
-\operatorname{atan2}
+\mathrm{atan2}
 \left(
 \sin(\theta_i^\star-\theta_i),
 \cos(\theta_i^\star-\theta_i)
@@ -694,7 +694,7 @@ $$
 $$
 u_i
 =
-\operatorname{sat}_{[-u_{\max},u_{\max}]}
+\mathrm{sat}_{[-u_{\max},u_{\max}]}
 \left(2e_{\theta,i}\right).
 $$
 
@@ -703,7 +703,7 @@ The implementation updates heading first and then position:
 $$
 \theta_i^{n+1}
 =
-\operatorname{wrap}
+\mathrm{wrap}
 \left(\theta_i^n+u_i^n\Delta t_A\right),
 $$
 
@@ -739,7 +739,7 @@ heading first, and then position:
 $$
 \theta_i^{n+1}
 =
-\operatorname{wrap}
+\mathrm{wrap}
 \left(\theta_i^n+\omega_i^n\Delta t_G\right),
 $$
 
@@ -779,7 +779,7 @@ $\mathbf q_j$ is assigned by
 $$
 i^\star(j)
 =
-\operatorname*{arg\,min}_{i\in\{1,\ldots,R\}}
+\mathrm*{arg\,min}_{i\in\{1,\ldots,R\}}
 \lVert\mathbf q_j-\mathbf p_i\rVert_2^2,
 $$
 
@@ -859,13 +859,13 @@ $$
 \qquad
 r_i=\lVert\mathbf e_i\rVert_2,
 \qquad
-\theta_i^\star=\operatorname{atan2}(e_{i,y},e_{i,x}),
+\theta_i^\star=\mathrm{atan2}(e_{i,y},e_{i,x}),
 $$
 
 $$
 e_{\theta,i}
 =
-\operatorname{wrap}(\theta_i^\star-\theta_i).
+\mathrm{wrap}(\theta_i^\star-\theta_i).
 $$
 
 Outside the centroid tolerance, the controls are
@@ -873,14 +873,14 @@ Outside the centroid tolerance, the controls are
 $$
 v_i
 =
-\operatorname{sat}_{[-v_{\max},v_{\max}]}
+\mathrm{sat}_{[-v_{\max},v_{\max}]}
 \left(k_p r_i\cos e_{\theta,i}\right),
 $$
 
 $$
 \omega_i
 =
-\operatorname{sat}_{[-\omega_{\max},\omega_{\max}]}
+\mathrm{sat}_{[-\omega_{\max},\omega_{\max}]}
 \left(k_\theta e_{\theta,i}\right).
 $$
 
@@ -917,7 +917,7 @@ $$
 $$
 a_{hj}
 =
-\operatorname{atan2}
+\mathrm{atan2}
 (q_{j,y}-y_h,q_{j,x}-x_h)-\theta_h,
 $$
 
@@ -1081,7 +1081,7 @@ aerial target. It should therefore be interpreted carefully in coupled runs.
 Useful field diagnostics include root mean squared error
 
 $$
-\operatorname{RMSE}
+\mathrm{RMSE}
 =
 \sqrt{
 \frac{1}{N}
@@ -1096,7 +1096,7 @@ and mean negative log predictive density, when evaluating against simulator
 truth:
 
 $$
-\operatorname{MNLPD}
+\mathrm{MNLPD}
 =
 \frac{1}{N}
 \sum_{j=1}^{N}

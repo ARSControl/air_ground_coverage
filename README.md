@@ -110,11 +110,6 @@ posterior, aerial target density, and subsequent aerial command or trajectory.
   dynamics, scheduling, and metrics, with an equation-to-code map.
 - [Multi-fidelity configuration reference](docs/multifidelity_config_reference.md):
   detailed documentation for every parameter in the canonical configuration.
-- [Implementation status](docs/multifidelity_gp_status.md): completed
-  milestones, deterministic validation results, visual artifacts, and
-  regeneration commands.
-- [Design and architecture](docs/multifidelity_gp_design.md): approved target
-  architecture and its rationale.
 
 ## Repository layout
 
