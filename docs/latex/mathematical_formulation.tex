@@ -19,7 +19,7 @@
 This document is the typeset mathematical reference for the coupled multi-fidelity coverage simulator. It specifies the implemented scalar fields, sensor model, central autoregressive Gaussian process, controller densities, aerial and ground controllers, dynamics, event ordering, and evaluation metrics.
 \end{abstract}
 
-\section{1. Scope and notation}
+\section{Scope and notation}
 
 
 The equations are marked conceptually as follows:
@@ -71,28 +71,28 @@ Unless stated otherwise, the current multi-fidelity path uses one central poster
 \end{itemize}
 
 
-\section{2. Simulator ground truth}
+\section{Simulator ground truth}
 
 
-\subsection{2.1 HIGH-fidelity field}
+\subsection{HIGH-fidelity field}
 
 
 The simulator constructs a smooth HIGH-fidelity field from a Gaussian mixture. For $K$ components,
 
 
 \begin{equation}
-g(\mathbf q) = \sum_{k=1}^{K} 
-\pi_k 
+g(\mathbf q) = \sum_{k=1}^{K}
+\pi_k
 \frac{
 \exp\!\left[
--\frac{1}{2} 
-(\mathbf q-\boldsymbol\mu_k)^\top 
-\boldsymbol\Sigma_k^{-1} 
-(\mathbf q-\boldsymbol\mu_k) 
-\right] 
+-\frac{1}{2}
+(\mathbf q-\boldsymbol\mu_k)^\top
+\boldsymbol\Sigma_k^{-1}
+(\mathbf q-\boldsymbol\mu_k)
+\right]
 }{
-2\pi\sqrt{\det(\boldsymbol\Sigma_k)} 
-}, 
+2\pi\sqrt{\det(\boldsymbol\Sigma_k)}
+},
 \sum_{k=1}^{K}\pi_k=1
 \end{equation}
 
@@ -101,10 +101,10 @@ On the raster, this field is min-max scaled and obstacles are masked:
 
 
 \begin{equation}
-f_H(\mathbf q_j) \\ 
-= \\ 
-\mathbf 1_{\mathrm{free}}(\mathbf q_j) \\ 
-\frac{g(\mathbf q_j)-g_{\min}} \\ 
+f_H(\mathbf q_j) \\
+= \\
+\mathbf 1_{\mathrm{free}}(\mathbf q_j) \\
+\frac{g(\mathbf q_j)-g_{\min}} \\
 {g_{\max}-g_{\min}+\varepsilon}
 \end{equation}
 
@@ -112,15 +112,15 @@ f_H(\mathbf q_j) \\
 This is the simulator's hidden truth. The estimator receives noisy samples, not the mixture parameters or the complete raster.
 
 
-\subsection{2.2 Simulator LOW field and discrepancy}
+\subsection{Simulator LOW field and discrepancy}
 
 
 The LOW truth is a normalized Gaussian smoothing of the masked HIGH truth. If $G_s$ is a Gaussian filter with standard deviation $s$ cells and $M$ is the free-space mask, the implemented normalized convolution is
 
 
 \begin{equation}
-f_L \\ 
-= \\ 
+f_L \\
+= \\
 \frac{G_s * (M f_H)}{G_s * M}
 \end{equation}
 
@@ -144,15 +144,14 @@ f_H(\mathbf q)=\rho f_L(\mathbf q)+\delta(\mathbf q)
 The simulator uses this identity to generate a coherent test problem. The estimator does not observe the simulator's $\delta$ field directly.
 
 
-\section{3. Sensor model}
+\section{Sensor model}
 
 
 An observation from fidelity $s\in\{L,H\}$ at position $\mathbf q_n$ is
 
 
 \begin{equation}
-y_n=f_s(\mathbf q_n)+\epsilon_n, \\ 
-\qquad \\ 
+y_n=f_s(\mathbf q_n)+\epsilon_n, \qquad
 \epsilon_n\sim\mathcal N(0,\tau_{s,n}^2)
 \end{equation}
 
@@ -160,19 +159,19 @@ y_n=f_s(\mathbf q_n)+\epsilon_n, \\
 The configured sensor noise values are variances, so the noise standard deviation used to draw a sample is $\sqrt{\tau_{s,n}^2}$. Field values are read from the nearest raster cell after the continuous sample position is generated.
 
 
-\subsection{3.1 Uniform-sector sampling}
+\subsection{Uniform-sector sampling}
 
 
 For a robot at $\mathbf p$ with heading $\theta$, sensor range $R$, and total field-of-view angle $\Psi$, the sensor's only sampling law draws
 
 
 \begin{equation}
-\alpha\sim \\ 
-\mathcal U\!\left(\theta-\frac{\Psi}{2}, \\ 
-\theta+\frac{\Psi}{2}\right), \\ 
-\qquad \\ 
-U\sim\mathcal U(0,1), \\ 
-\qquad \\ 
+\alpha\sim \\
+\mathcal U\!\left(\theta-\frac{\Psi}{2}, \\
+\theta+\frac{\Psi}{2}\right),
+\qquad
+U\sim\mathcal U(0,1),
+\qquad
 r=R\sqrt{U}
 \end{equation}
 
@@ -181,13 +180,13 @@ and returns
 
 
 \begin{equation}
-\mathbf q \\ 
-= \\ 
-\mathbf p+ \\ 
-r \\ 
-\begin{bmatrix} \\ 
-\cos\alpha\\ \\ 
-\sin\alpha \\ 
+\mathbf q \\
+= \\
+\mathbf p+ \\
+r \\
+\begin{bmatrix}
+\cos\alpha\\
+\sin\alpha \\
 \end{bmatrix}
 \end{equation}
 
@@ -195,20 +194,20 @@ r \\
 The square root makes sample locations uniform with respect to area inside the sector because the polar area element is $r\,dr\,d\alpha$. Out-of-bounds draws are resampled up to the configured attempt limit. There is no sampling-mode parameter or alternative fixed-ray branch in the production sensor.
 
 
-\section{4. Autoregressive multi-fidelity Gaussian process}
+\section{Autoregressive multi-fidelity Gaussian process}
 
 
-\subsection{4.1 Prior}
+\subsection{Prior}
 
 
 The central estimator assumes independent zero-mean Gaussian processes
 
 
 \begin{equation}
-f_L\sim\mathcal{GP}(0,k_L), \\ 
-\qquad \\ 
-\delta\sim\mathcal{GP}(0,k_\delta), \\ 
-\qquad \\ 
+f_L\sim\mathcal{GP}(0,k_L),
+\qquad
+\delta\sim\mathcal{GP}(0,k_\delta),
+\qquad
 f_L\perp\delta
 \end{equation}
 
@@ -225,14 +224,12 @@ Both covariance functions are isotropic squared-exponential kernels:
 
 
 \begin{equation}
-k_a(\mathbf q,\mathbf q') \\ 
-= \\ 
-\sigma_a^2 \\ 
-\exp\!\left( \\ 
--\frac{\lVert\mathbf q-\mathbf q'\rVert_2^2} \\ 
-{2\ell_a^2} \\ 
-\right), \\ 
-\qquad \\ 
+k_a(\mathbf q,\mathbf q') \\
+= \\
+\sigma_a^2 \\
+\exp\!\left( \\
+-\frac{\lVert\mathbf q-\mathbf q'\rVert_2^2}{2\ell_a^2} \\
+\right), \qquad
 a\in\{L,\delta\}
 \end{equation}
 
@@ -240,7 +237,7 @@ a\in\{L,\delta\}
 Here $\ell_a$ is a length scale and $\sigma_a^2$ is the configured kernel variance.
 
 
-\subsection{4.2 What is known and what is learned}
+\subsection{What is known and what is learned}
 
 
 \begin{longtable}{p{0.34\textwidth} p{0.56\textwidth}}
@@ -268,18 +265,18 @@ Simulator truth, GMM parameters, and true discrepancy & Unknown to the estimator
 Fitting hyperparameters is empirical Bayes: it produces one bounded maximum-marginal-likelihood point estimate. It does not maintain a posterior distribution over the hyperparameters.
 
 
-\subsection{4.3 Joint observation covariance}
+\subsection{Joint observation covariance}
 
 
 Let
 
 
 \begin{equation}
-\mathbf y \\ 
-= \\ 
-\begin{bmatrix} \\ 
-\mathbf y_L\\ \\ 
-\mathbf y_H \\ 
+\mathbf y
+=
+\begin{bmatrix}
+\mathbf y_L\\
+\mathbf y_H
 \end{bmatrix}
 \end{equation}
 
@@ -288,16 +285,13 @@ with LOW inputs $X_L$, HIGH inputs $X_H$, and diagonal observation-noise matrice
 
 
 \begin{equation}
-K_y \\ 
-= \\ 
-\begin{bmatrix} \\ 
-K_L(X_L,X_L)+D_L \\ 
-\\ 
-\rho K_L(X_L,X_H) \\ 
-\\ \\ 
-\rho K_L(X_H,X_L) \\ 
-\\ 
-\rho^2 K_L(X_H,X_H)+K_\delta(X_H,X_H)+D_H \\ 
+K_y \\
+= \\
+\begin{bmatrix}
+K_L(X_L,X_L)+D_L \\
+\rho K_L(X_L,X_H) \\
+\rho K_L(X_H,X_L) \\
+\rho^2 K_L(X_H,X_H)+K_\delta(X_H,X_H)+D_H \\
 \end{bmatrix}
 \end{equation}
 
@@ -313,7 +307,7 @@ The implementation adds adaptive diagonal jitter:
 Starting from the configured $\eta$, failed Cholesky attempts multiply it by the configured jitter multiplier. No explicit matrix inverse is formed.
 
 
-\subsection{4.4 Cholesky solve}
+\subsection{Cholesky solve}
 
 
 For
@@ -328,8 +322,8 @@ the implementation solves
 
 
 \begin{equation}
-L\mathbf z=\mathbf y, \\ 
-\qquad \\ 
+L\mathbf z=\mathbf y, \\
+\qquad \\
 L^\top\boldsymbol\alpha=\mathbf z
 \end{equation}
 
@@ -345,19 +339,16 @@ Thus
 conceptually, while the numerical computation uses triangular solves.
 
 
-\subsection{4.5 HIGH-fidelity posterior}
+\subsection{HIGH-fidelity posterior}
 
 
 For query points $X_*$, the covariance between training observations and the latent HIGH field is
 
 
 \begin{equation}
-K_{y*} \\ 
-= \\ 
-\begin{bmatrix} \\ 
-\rho K_L(X_L,X_*) \\ 
-\\ \\ 
-\rho^2 K_L(X_H,X_*)+K_\delta(X_H,X_*) \\ 
+K_{y*} = \begin{bmatrix}
+\rho K_L(X_L,X_*) \\
+\rho^2 K_L(X_H,X_*)+K_\delta(X_H,X_*) \\
 \end{bmatrix}
 \end{equation}
 
@@ -366,8 +357,8 @@ The prior HIGH covariance is
 
 
 \begin{equation}
-K_{**} \\ 
-= \\ 
+K_{**} \\
+= \\
 \rho^2K_L(X_*,X_*)+K_\delta(X_*,X_*)
 \end{equation}
 
@@ -376,8 +367,8 @@ The posterior mean is
 
 
 \begin{equation}
-\boldsymbol\mu_H \\ 
-= \\ 
+\boldsymbol\mu_H \\
+= \\
 K_{y*}^\top\boldsymbol\alpha
 \end{equation}
 
@@ -394,8 +385,8 @@ then the posterior marginal variance at query point $j$ is
 
 
 \begin{equation}
-\sigma_{H,j}^2 = 
-[K_{**}]_{jj} 
+\sigma_{H,j}^2 =
+[K_{**}]_{jj}
 -
 \sum_r V_{rj}^2
 \end{equation}
@@ -404,21 +395,21 @@ then the posterior marginal variance at query point $j$ is
 Only tiny negative values attributable to floating-point roundoff are clipped to zero. Materially negative variances cause the candidate update to fail.
 
 
-\subsection{4.6 Hyperparameter fitting}
+\subsection{Hyperparameter fitting}
 
 
 The four positive kernel parameters are optimized in log space:
 
 
 \begin{equation}
-\boldsymbol\xi \\ 
-= \\ 
-\log \\ 
-\begin{bmatrix} \\ 
-\ell_L & \\ 
-\sigma_L^2 & \\ 
-\ell_\delta & \\ 
-\sigma_\delta^2 \\ 
+\boldsymbol\xi \\
+= \\
+\log
+\begin{bmatrix}
+\ell_L \\
+\sigma_L^2  \\
+\ell_\delta \\
+\sigma_\delta^2 \\
 \end{bmatrix}^{\!\top}
 \end{equation}
 
@@ -427,12 +418,12 @@ The bounded L-BFGS-B objective is the negative log marginal likelihood
 
 
 \begin{equation}
-\mathcal L(\boldsymbol\xi) \\ 
-= \\ 
-\frac{1}{2}\mathbf y^\top\boldsymbol\alpha \\ 
-+ \\ 
-\sum_{r=1}^{N}\log L_{rr} \\ 
-+ \\ 
+\mathcal L(\boldsymbol\xi) \\
+= \\
+\frac{1}{2}\mathbf y^\top\boldsymbol\alpha \\
++ \\
+\sum_{r=1}^{N}\log L_{rr} \\
++ \\
 \frac{N}{2}\log(2\pi)
 \end{equation}
 
@@ -440,18 +431,18 @@ The bounded L-BFGS-B objective is the negative log marginal likelihood
 Fitting occurs only when optimization is enabled, the retained sample count reaches its configured minimum, and the current posterior version satisfies the configured update interval. The value of $\rho$ and both sensor-noise models remain fixed.
 
 
-\subsection{4.7 Query-grid quadrature}
+\subsection{Query-grid quadrature}
 
 
 For each axis, the estimator uses equally spaced query coordinates and trapezoidal weights. With spacing $h_x$,
 
 
 \begin{equation}
-w^x_j \\ 
-= \\ 
+w^x_j \\
+= \\
 \begin{cases}
 h_x/2, & j\text{ is an endpoint},\\
-h_x, & \text{otherwise}, \\ 
+h_x, & \text{otherwise}, \\
 \end{cases}
 \end{equation}
 
@@ -467,18 +458,18 @@ w_{jk}=w^x_jw^y_k
 These weights approximate integrals and are the $w_j$ used in density normalization and Lloyd centroid calculations.
 
 
-\section{5. From the GP posterior to controller densities}
+\section{From the GP posterior to controller densities}
 
 
-\subsection{5.1 Positive posterior interest}
+\subsection{Positive posterior interest}
 
 
 The shared posterior interest field is the positive part of the HIGH posterior mean:
 
 
 \begin{equation}
-\mu_H^+(\mathbf q_j) \\ 
-= \\ 
+\mu_H^+(\mathbf q_j) \\
+= \\
 \max\!\left(\mu_H(\mathbf q_j),0\right)
 \end{equation}
 
@@ -487,20 +478,20 @@ For a free-space mask $M_j\in\{0,1\}$ and quadrature weights $w_j$, the publishe
 
 
 \begin{equation}
-\phi_j \\ 
-= \\ 
-\frac{ \\ 
-M_j\mu_H^+(\mathbf q_j) \\ 
-}{ \\ 
-\sum_k M_k\mu_H^+(\mathbf q_k)w_k \\ 
+\phi_j \\
+= \\
+\frac{ \\
+M_j\mu_H^+(\mathbf q_j) \\
+}{ \\
+\sum_k M_k\mu_H^+(\mathbf q_k)w_k \\
 }
 \end{equation}
 
 
 Therefore
 \begin{equation}
-\phi_j\ge 0, \\ 
-\qquad \\ 
+\phi_j\ge 0, \\
+\qquad \\
 \sum_j\phi_jw_j=1
 \end{equation}
 
@@ -508,19 +499,19 @@ Therefore
 The clipping preserves all positive posterior contrast. It does not exponentiate the field, shift negative values upward, or retain the removed softplus transformation. If every posterior mean value is nonpositive, normalization has zero mass and the estimator transaction preserves the last valid snapshot.
 
 
-\subsection{5.2 Aerial interest-plus-uncertainty target}
+\subsection{Aerial interest-plus-uncertainty target}
 
 
 Let
 
 
 \begin{equation}
-\bar\sigma_{H,j} \\ 
-= \\ 
+\bar\sigma_{H,j} \\
+= \\
 \begin{cases}
-\sigma_{H,j}/\max_k\sigma_{H,k}, & 
-\max_k\sigma_{H,k}>0,\\ 
-0, & \text{otherwise}. \\ 
+\sigma_{H,j}/\max_k\sigma_{H,k}, &
+\max_k\sigma_{H,k}>0,\\
+0, & \text{otherwise}. \\
 \end{cases}
 \end{equation}
 
@@ -529,8 +520,8 @@ The unnormalized aerial importance is
 
 
 \begin{equation}
-\widetilde\phi^{\,A}_j \\ 
-= \\ 
+\widetilde\phi^{\,A}_j \\
+= \\
 \lambda_I\phi_j+\lambda_U\bar\sigma_{H,j}
 \end{equation}
 
@@ -539,17 +530,16 @@ where $\lambda_I\ge 0$ is the interest weight and $\lambda_U\ge 0$ is the uncert
 
 
 \begin{equation}
-\phi^A_j \\ 
-= \\ 
-\frac{M_j\widetilde\phi^{\,A}_j} \\ 
-{\sum_kM_k\widetilde\phi^{\,A}_kw_k}
+\phi^A_j \\
+= \\
+\frac{M_j\widetilde\phi^{\,A}_j}{\sum_kM_k\widetilde\phi^{\,A}_kw_k}
 \end{equation}
 
 
 This density is bilinearly resampled onto the aerial HEDAC raster and normalized again there. All aerial robots see the same target; HEDAC coverage history and their different positions make their individual motions differ.
 
 
-\subsection{5.3 Ground importance}
+\subsection{Ground importance}
 
 
 The ground controllers use
@@ -563,20 +553,20 @@ The ground controllers use
 Posterior variance is intentionally absent from the current ground objective. If the controller grid differs from the posterior grid, the density is bilinearly interpolated and quadrature-normalized again.
 
 
-\section{6. HEDAC aerial coverage}
+\section{HEDAC aerial coverage}
 
 
-\subsection{6.1 Coverage footprint}
+\subsection{Coverage footprint}
 
 
 For an offset $\mathbf r$ from an aerial robot, the discrete coverage footprint is
 
 
 \begin{equation}
-\kappa(\mathbf r) \\ 
-= \\ 
-\exp\!\left( \\ 
--\frac{\lVert\mathbf r\rVert_2^2}{R_a} \\ 
+\kappa(\mathbf r) \\
+= \\
+\exp\!\left( \\
+-\frac{\lVert\mathbf r\rVert_2^2}{R_a} \\
 \right)
 \end{equation}
 
@@ -585,12 +575,12 @@ because the implementation uses the RBF shape parameter $1/R_a$. The square foot
 
 
 \begin{equation}
-h_\kappa \\ 
-= \\ 
-\left\lceil \\ 
-\sqrt{ \\ 
-\frac{-R_a\log\kappa_{\min}}{d} \\ 
-} \\ 
+h_\kappa \\
+= \\
+\left\lceil \\
+\sqrt{ \\
+\frac{-R_a\log\kappa_{\min}}{d} \\
+} \\
 \right\rceil
 \end{equation}
 
@@ -599,8 +589,8 @@ At HEDAC step $n$, the cumulative raster coverage is updated by adding one footp
 
 
 \begin{equation}
-C_j^{n+1} \\ 
-= \\ 
+C_j^{n+1} \\
+= \\
 C_j^n+\sum_i\kappa(\mathbf q_j-\mathbf p_i^n)
 \end{equation}
 
@@ -608,15 +598,15 @@ C_j^n+\sum_i\kappa(\mathbf q_j-\mathbf p_i^n)
 with each footprint cropped at map boundaries.
 
 
-\subsection{6.2 Coverage deficit and source}
+\subsection{Coverage deficit and source}
 
 
 HEDAC uses sum normalization on its raster:
 
 
 \begin{equation}
-\widehat C_j \\ 
-= \\ 
+\widehat C_j \\
+= \\
 \frac{M_j C_j}{\sum_kM_kC_k+\varepsilon}
 \end{equation}
 
@@ -625,17 +615,17 @@ The current target $\phi^A$ is also sum-normalized on this raster. The positive 
 
 
 \begin{equation}
-d_j=\max(\phi^A_j-\widehat C_j,0), \\ 
-\qquad \\ 
+d_j=\max(\phi^A_j-\widehat C_j,0), \\
+\qquad \\
 \widetilde S_j=d_j^2
 \end{equation}
 
 
 \begin{equation}
-S_j \\ 
-= \\ 
-A_\Omega \\ 
-\frac{M_j\widetilde S_j} \\ 
+S_j \\
+= \\
+A_\Omega \\
+\frac{M_j\widetilde S_j} \\
 {\sum_kM_k\widetilde S_k+\varepsilon}
 \end{equation}
 
@@ -643,21 +633,21 @@ A_\Omega \\
 where $A_\Omega$ is the free map area.
 
 
-\subsection{6.3 Heat model}
+\subsection{Heat model}
 
 
 The intended heat-equation form is
 
 
 \begin{equation}
-\frac{\partial T}{\partial t} \\ 
-= \\ 
-\alpha\nabla^2T \\ 
-+ \\ 
-sS \\ 
-- \\ 
-\beta T \\ 
-- \\ 
+\frac{\partial T}{\partial t} \\
+= \\
+\alpha\nabla^2T \\
++ \\
+sS \\
+- \\
+\beta T \\
+- \\
 \gamma L_c
 \end{equation}
 
@@ -669,13 +659,13 @@ The current non-optimized implementation evaluates the following five-point inte
 
 
 \begin{equation}
-\mathcal D_\alpha[T]_{r,c} \\ 
-= \\ 
-\alpha \\ 
-\left( \\ 
-T_{r+1,c}+T_{r-1,c}+T_{r,c+1}+T_{r,c-1} \\ 
-\right) \\ 
-- \\ 
+\mathcal D_\alpha[T]_{r,c} \\
+= \\
+\alpha \\
+\left( \\
+T_{r+1,c}+T_{r-1,c}+T_{r,c+1}+T_{r,c-1} \\
+\right) \\
+- \\
 4T_{r,c}
 \end{equation}
 
@@ -684,19 +674,19 @@ Then
 
 
 \begin{equation}
-T_{r,c}^{n+1} \\ 
-= \\ 
-T_{r,c}^{n} \\ 
-+ \\ 
-\Delta t_H \\ 
-\left[ \\ 
-\frac{\mathcal D_\alpha[T^n]_{r,c}}{\Delta x^2} \\ 
-+ \\ 
-sS_{r,c} \\ 
-- \\ 
-\frac{\beta}{A_\Omega}T_{r,c}^n \\ 
-- \\ 
-\frac{\gamma}{A_\Omega}(L_c)_{r,c} \\ 
+T_{r,c}^{n+1} \\
+= \\
+T_{r,c}^{n} \\
++ \\
+\Delta t_H \\
+\left[ \\
+\frac{\mathcal D_\alpha[T^n]_{r,c}}{\Delta x^2} \\
++ \\
+sS_{r,c} \\
+- \\
+\frac{\beta}{A_\Omega}T_{r,c}^n \\
+- \\
+\frac{\gamma}{A_\Omega}(L_c)_{r,c} \\
 \right]
 \end{equation}
 
@@ -711,11 +701,11 @@ The explicit heat step is limited by
 
 
 \begin{equation}
-\Delta t_H \\ 
-= \\ 
-\min\!\left( \\ 
-\Delta t, \\ 
-\frac{c_{\mathrm{CFL}}\Delta x^2}{4\alpha} \\ 
+\Delta t_H \\
+= \\
+\min\!\left( \\
+\Delta t, \\
+\frac{c_{\mathrm{CFL}}\Delta x^2}{4\alpha} \\
 \right)
 \end{equation}
 
@@ -723,19 +713,19 @@ The explicit heat step is limited by
 for $\alpha>0$, and $\Delta t_H=\Delta t$ for $\alpha=0$.
 
 
-\subsection{6.4 Heat-gradient direction}
+\subsection{Heat-gradient direction}
 
 
 The raster gradients are computed by finite differences. They are first globally scaled by
 
 
 \begin{equation}
-g_{\mathrm{rms}} \\ 
-= \\ 
-\sqrt{ \\ 
-\mathrm{mean}(T_x^2) \\ 
-+ \\ 
-\mathrm{mean}(T_y^2) \\ 
+g_{\mathrm{rms}} \\
+= \\
+\sqrt{ \\
+\mathrm{mean}(T_x^2) \\
++ \\
+\mathrm{mean}(T_y^2) \\
 }
 \end{equation}
 
@@ -747,12 +737,12 @@ Finally, only the direction is retained:
 
 
 \begin{equation}
-\mathbf d_i \\ 
-= \\ 
+\mathbf d_i \\
+= \\
 \begin{cases}
-\nabla T(\mathbf p_i)/\lVert\nabla T(\mathbf p_i)\rVert_2, & 
+\nabla T(\mathbf p_i)/\lVert\nabla T(\mathbf p_i)\rVert_2, &
 \lVert\nabla T(\mathbf p_i)\rVert_2>0,\\
-\mathbf 0, & \text{otherwise}. \\ 
+\mathbf 0, & \text{otherwise}. \\
 \end{cases}
 \end{equation}
 
@@ -761,26 +751,26 @@ The target velocity and heading are
 
 
 \begin{equation}
-\mathbf v_i^\star=v_{\max}\mathbf d_i, \\ 
-\qquad \\ 
+\mathbf v_i^\star=v_{\max}\mathbf d_i, \\
+\qquad \\
 \theta_i^\star=\mathrm{atan2}(d_{i,y},d_{i,x})
 \end{equation}
 
 
-\section{7. Robot dynamics}
+\section{Robot dynamics}
 
 
-\subsection{7.1 Aerial Dubins dynamics}
+\subsection{Aerial Dubins dynamics}
 
 
 The canonical aerial configuration uses fixed-speed Dubins dynamics:
 
 
 \begin{equation}
-\dot x_i=v_A\cos\theta_i, \\ 
-\qquad \\ 
-\dot y_i=v_A\sin\theta_i, \\ 
-\qquad \\ 
+\dot x_i=v_A\cos\theta_i, \\
+\qquad \\
+\dot y_i=v_A\sin\theta_i, \\
+\qquad \\
 \dot\theta_i=u_i
 \end{equation}
 
@@ -789,8 +779,8 @@ The coordinated-turn limit derived from maximum bank angle $\varphi_{\max}$ is
 
 
 \begin{equation}
-u_{\max} \\ 
-= \\ 
+u_{\max} \\
+= \\
 \frac{g\tan\varphi_{\max}}{v_A}
 \end{equation}
 
@@ -799,20 +789,20 @@ The HEDAC heading tracker uses
 
 
 \begin{equation}
-e_{\theta,i} \\ 
-= \\ 
-\mathrm{atan2} \\ 
-\left( \\ 
-\sin(\theta_i^\star-\theta_i), \\ 
-\cos(\theta_i^\star-\theta_i) \\ 
+e_{\theta,i} \\
+= \\
+\mathrm{atan2} \\
+\left( \\
+\sin(\theta_i^\star-\theta_i), \\
+\cos(\theta_i^\star-\theta_i) \\
 \right)
 \end{equation}
 
 
 \begin{equation}
-u_i \\ 
-= \\ 
-\mathrm{sat}_{[-u_{\max},u_{\max}]} \\ 
+u_i \\
+= \\
+\mathrm{sat}_{[-u_{\max},u_{\max}]} \\
 \left(2e_{\theta,i}\right)
 \end{equation}
 
@@ -821,22 +811,22 @@ The implementation updates heading first and then position:
 
 
 \begin{equation}
-\theta_i^{n+1} \\ 
-= \\ 
-\mathrm{wrap} \\ 
+\theta_i^{n+1} \\
+= \\
+\mathrm{wrap} \\
 \left(\theta_i^n+u_i^n\Delta t_A\right)
 \end{equation}
 
 
 \begin{equation}
-\mathbf p_i^{n+1} \\ 
-= \\ 
-\mathbf p_i^n \\ 
-+ \\ 
-v_A\Delta t_A \\ 
-\begin{bmatrix} \\ 
-\cos\theta_i^{n+1}\\ \\ 
-\sin\theta_i^{n+1} \\ 
+\mathbf p_i^{n+1} \\
+= \\
+\mathbf p_i^n \\
++ \\
+v_A\Delta t_A \\
+\begin{bmatrix} \\
+\cos\theta_i^{n+1}\\ \\
+\sin\theta_i^{n+1} \\
 \end{bmatrix}
 \end{equation}
 
@@ -844,17 +834,17 @@ v_A\Delta t_A \\
 Positions are clipped to the map after the controller step.
 
 
-\subsection{7.2 Ground unicycle dynamics}
+\subsection{Ground unicycle dynamics}
 
 
 Both current ground controllers require or predict the unicycle model
 
 
 \begin{equation}
-\dot x_i=v_i\cos\theta_i, \\ 
-\qquad \\ 
-\dot y_i=v_i\sin\theta_i, \\ 
-\qquad \\ 
+\dot x_i=v_i\cos\theta_i, \\
+\qquad \\
+\dot y_i=v_i\sin\theta_i, \\
+\qquad \\
 \dot\theta_i=\omega_i
 \end{equation}
 
@@ -863,22 +853,22 @@ The real ground agent clips $(v_i,\omega_i)$ to its configured limits, updates h
 
 
 \begin{equation}
-\theta_i^{n+1} \\ 
-= \\ 
-\mathrm{wrap} \\ 
+\theta_i^{n+1} \\
+= \\
+\mathrm{wrap} \\
 \left(\theta_i^n+\omega_i^n\Delta t_G\right)
 \end{equation}
 
 
 \begin{equation}
-\mathbf p_i^{n+1} \\ 
-= \\ 
-\mathbf p_i^n \\ 
-+ \\ 
-v_i^n\Delta t_G \\ 
-\begin{bmatrix} \\ 
-\cos\theta_i^{n+1}\\ \\ 
-\sin\theta_i^{n+1} \\ 
+\mathbf p_i^{n+1} \\
+= \\
+\mathbf p_i^n \\
++ \\
+v_i^n\Delta t_G \\
+\begin{bmatrix} \\
+\cos\theta_i^{n+1}\\ \\
+\sin\theta_i^{n+1} \\
 \end{bmatrix}
 \end{equation}
 
@@ -887,14 +877,14 @@ The MPC prediction model uses forward Euler with the old heading instead:
 
 
 \begin{equation}
-\begin{bmatrix} \\ 
-x_{h+1}\\y_{h+1}\\\theta_{h+1} \\ 
-\end{bmatrix} \\ 
-= \\ 
-\begin{bmatrix} \\ 
-x_h+v_h\cos\theta_h\,\Delta t\\ \\ 
-y_h+v_h\sin\theta_h\,\Delta t\\ \\ 
-\theta_h+\omega_h\Delta t \\ 
+\begin{bmatrix} \\
+x_{h+1}\\y_{h+1}\\\theta_{h+1} \\
+\end{bmatrix} \\
+= \\
+\begin{bmatrix} \\
+x_h+v_h\cos\theta_h\,\Delta t\\ \\
+y_h+v_h\sin\theta_h\,\Delta t\\ \\
+\theta_h+\omega_h\Delta t \\
 \end{bmatrix}
 \end{equation}
 
@@ -902,28 +892,28 @@ y_h+v_h\sin\theta_h\,\Delta t\\ \\
 This one-step discretization difference is part of the present implementation.
 
 
-\section{8. Ground-only Voronoi partition}
+\section{Ground-only Voronoi partition}
 
 
 For ground positions $\{\mathbf p_1,\ldots,\mathbf p_R\}$, query point $\mathbf q_j$ is assigned by
 
 
 \begin{equation}
-i^\star(j) \\ 
-= \\ 
-\operatorname*{arg\,min}_{i\in\{1,\ldots,R\}} \\ 
+i^\star(j) \\
+= \\
+\operatorname*{arg\,min}_{i\in\{1,\ldots,R\}} \\
 \lVert\mathbf q_j-\mathbf p_i\rVert_2^2
 \end{equation}
 
 
 \begin{equation}
-V_{ij} \\ 
-= \\ 
-\begin{cases} 
-1, & i=i^\star(j) 
-\text{ and } 
-\lVert\mathbf q_j-\mathbf p_i\rVert_2\le R_V,\\ \\ 
-0, & \text{otherwise}. \\ 
+V_{ij} \\
+= \\
+\begin{cases}
+1, & i=i^\star(j)
+\text{ and }
+\lVert\mathbf q_j-\mathbf p_i\rVert_2\le R_V,\\ \\
+0, & \text{otherwise}. \\
 \end{cases}
 \end{equation}
 
@@ -931,21 +921,21 @@ V_{ij} \\
 Only ground positions are passed to this partition. Aerial positions do not compete for ground Voronoi cells. The Lloyd controller chooses a range larger than the map diagonal, so its cells cover the entire query grid. The MPC controller currently uses $R_V=50$ in map-coordinate units.
 
 
-\section{9. Lloyd ground controller}
+\section{Lloyd ground controller}
 
 
-\subsection{9.1 Continuous coverage objective}
+\subsection{Continuous coverage objective}
 
 
 The classical locational coverage objective is
 
 
 \begin{equation}
-\mathcal H(\mathbf p_1,\ldots,\mathbf p_R) \\ 
-= \\ 
-\sum_{i=1}^{R} \\ 
-\int_{\mathcal V_i} \\ 
-\lVert\mathbf q-\mathbf p_i\rVert_2^2 \\ 
+\mathcal H(\mathbf p_1,\ldots,\mathbf p_R) \\
+= \\
+\sum_{i=1}^{R} \\
+\int_{\mathcal V_i} \\
+\lVert\mathbf q-\mathbf p_i\rVert_2^2 \\
 \phi^G(\mathbf q)\,d\mathbf q
 \end{equation}
 
@@ -953,16 +943,16 @@ The classical locational coverage objective is
 For fixed Voronoi cells, its minimizer places each generator at the density-weighted centroid of its cell.
 
 
-\subsection{9.2 Discrete mass and centroid}
+\subsection{Discrete mass and centroid}
 
 
 The implemented cell mass is
 
 
 \begin{equation}
-m_i \\ 
-= \\ 
-\sum_j \\ 
+m_i \\
+= \\
+\sum_j \\
 V_{ij}\phi^G_jw_j
 \end{equation}
 
@@ -971,13 +961,13 @@ The centroid is
 
 
 \begin{equation}
-\mathbf c_i \\ 
-= \\ 
-\frac{ \\ 
-\sum_j \\ 
-\mathbf q_jV_{ij}\phi^G_jw_j \\ 
-}{ \\ 
-m_i \\ 
+\mathbf c_i \\
+= \\
+\frac{ \\
+\sum_j \\
+\mathbf q_jV_{ij}\phi^G_jw_j \\
+}{ \\
+m_i \\
 }
 \end{equation}
 
@@ -988,24 +978,24 @@ Thus $w_j$ is the area represented by grid point $j$ under trapezoidal quadratur
 If $m_i$ is numerically zero, the current robot position is used as the centroid.
 
 
-\subsection{9.3 Centroid tracking}
+\subsection{Centroid tracking}
 
 
 Define
 
 
 \begin{equation}
-\mathbf e_i=\mathbf c_i-\mathbf p_i, \\ 
-\qquad \\ 
-r_i=\lVert\mathbf e_i\rVert_2, \\ 
-\qquad \\ 
+\mathbf e_i=\mathbf c_i-\mathbf p_i, \\
+\qquad \\
+r_i=\lVert\mathbf e_i\rVert_2, \\
+\qquad \\
 \theta_i^\star=\mathrm{atan2}(e_{i,y},e_{i,x})
 \end{equation}
 
 
 \begin{equation}
-e_{\theta,i} \\ 
-= \\ 
+e_{\theta,i} \\
+= \\
 \mathrm{wrap}(\theta_i^\star-\theta_i)
 \end{equation}
 
@@ -1014,17 +1004,17 @@ Outside the centroid tolerance, the controls are
 
 
 \begin{equation}
-v_i \\ 
-= \\ 
-\mathrm{sat}_{[-v_{\max},v_{\max}]} \\ 
+v_i \\
+= \\
+\mathrm{sat}_{[-v_{\max},v_{\max}]} \\
 \left(k_p r_i\cos e_{\theta,i}\right)
 \end{equation}
 
 
 \begin{equation}
-\omega_i \\ 
-= \\ 
-\mathrm{sat}_{[-\omega_{\max},\omega_{\max}]} \\ 
+\omega_i \\
+= \\
+\mathrm{sat}_{[-\omega_{\max},\omega_{\max}]} \\
 \left(k_\theta e_{\theta,i}\right)
 \end{equation}
 
@@ -1032,10 +1022,10 @@ v_i \\
 Inside the tolerance, both controls are zero. The factor $\cos e_{\theta,i}$ reduces forward motion when the centroid is lateral and allows bounded reverse motion when it lies behind the robot.
 
 
-\section{10. MPC ground controller}
+\section{MPC ground controller}
 
 
-\subsection{10.1 Per-robot importance weights}
+\subsection{Per-robot importance weights}
 
 
 Robot $i$ receives the masked weights
@@ -1049,37 +1039,37 @@ W_{ij}=V_{ij}\phi^G_j
 These weights do not include quadrature factors in the current MPC objective.
 
 
-\subsection{10.2 Implemented limited-FOV stage cost}
+\subsection{Implemented limited-FOV stage cost}
 
 
 For predicted state $\mathbf x_h=(x_h,y_h,\theta_h)^\top$, define
 
 
 \begin{equation}
-r_{hj}^2 \\ 
-= \\ 
-\left\lVert \\ 
-\mathbf q_j- \\ 
-\begin{bmatrix}x_h\\y_h\end{bmatrix} \\ 
+r_{hj}^2 \\
+= \\
+\left\lVert \\
+\mathbf q_j- \\
+\begin{bmatrix}x_h\\y_h\end{bmatrix} \\
 \right\rVert_2^2
 \end{equation}
 
 
 \begin{equation}
-a_{hj} \\ 
-= \\ 
-\mathrm{atan2} \\ 
+a_{hj} \\
+= \\
+\mathrm{atan2} \\
 (q_{j,y}-y_h,q_{j,x}-x_h)-\theta_h
 \end{equation}
 
 
 \begin{equation}
-F_{hj}=2-\frac{r_{hj}^2}{R_F^2}, \\ 
-\qquad \\ 
-M_{hj} \\ 
-= \\ 
-\exp\!\left[ \\ 
--\frac{(a_{hj}-\Psi/2)^2}{2(\Psi/2)^2} \\ 
+F_{hj}=2-\frac{r_{hj}^2}{R_F^2}, \\
+\qquad \\
+M_{hj} \\
+= \\
+\exp\!\left[ \\
+-\frac{(a_{hj}-\Psi/2)^2}{2(\Psi/2)^2} \\
 \right]
 \end{equation}
 
@@ -1088,15 +1078,15 @@ The exact current stage cost is
 
 
 \begin{equation}
-\ell_i(\mathbf x_h) \\ 
-= \\ 
-- \\ 
-\sum_jF_{hj}M_{hj}W_{ij} \\ 
-- \\ 
-3\sum_j \\ 
-W_{ij} \\ 
-\exp\!\left( \\ 
--\frac{r_{hj}^2}{3R_F^2} \\ 
+\ell_i(\mathbf x_h) \\
+= \\
+- \\
+\sum_jF_{hj}M_{hj}W_{ij} \\
+- \\
+3\sum_j \\
+W_{ij} \\
+\exp\!\left( \\
+-\frac{r_{hj}^2}{3R_F^2} \\
 \right)
 \end{equation}
 
@@ -1104,15 +1094,15 @@ W_{ij} \\
 This formula is documented as implemented. In particular, the angular Gaussian is centered at $+\Psi/2$, not at zero, and the relative angle is not explicitly wrapped. The function parameter intended for mask steepness is currently unused.
 
 
-\subsection{10.3 Finite-horizon problem}
+\subsection{Finite-horizon problem}
 
 
 With horizon $H$, the solver computes
 
 
 \begin{equation}
-\min_{\{v_h,\omega_h\}_{h=0}^{H-1}} \\ 
-\quad \\ 
+\min_{\{v_h,\omega_h\}_{h=0}^{H-1}} \\
+\quad \\
 10\sum_{h=0}^{H-1}\ell_i(\mathbf x_h
 \end{equation}
 
@@ -1121,8 +1111,8 @@ subject to the unicycle prediction dynamics and control bounds
 
 
 \begin{equation}
--a_{\max}\le v_h\le a_{\max}, \\ 
-\qquad \\ 
+-a_{\max}\le v_h\le a_{\max}, \\
+\qquad \\
 -a_{\max}\le\omega_h\le a_{\max}
 \end{equation}
 
@@ -1131,8 +1121,8 @@ The same configured quantity named maximum acceleration is currently used as the
 
 
 \begin{equation}
-0\le x_H\le W_{\mathrm{map}}, \\ 
-\qquad \\ 
+0\le x_H\le W_{\mathrm{map}}, \\
+\qquad \\
 0\le y_H\le H_{\mathrm{map}}
 \end{equation}
 
@@ -1140,16 +1130,16 @@ The same configured quantity named maximum acceleration is currently used as the
 There is currently no active collision penalty, control-effort penalty, or orientation penalty in this optimization. IPOPT is warm-started from the previous solution, and only the first optimized pair $(v_0,\omega_0)$ is sent to the real unicycle agent.
 
 
-\subsection{10.4 Other retained cost functions}
+\subsection{Other retained cost functions}
 
 
 The codebase also defines, but the current coupled MPC does not use,
 
 
 \begin{equation}
-J_{\mathrm{coverage}}(\mathbf p_i) \\ 
-= \\ 
-\sum_j \\ 
+J_{\mathrm{coverage}}(\mathbf p_i) \\
+= \\
+\sum_j \\
 \lVert\mathbf q_j-\mathbf p_i\rVert_2^2W_{ij}
 \end{equation}
 
@@ -1158,14 +1148,14 @@ and the collision penalty
 
 
 \begin{equation}
-J_{\mathrm{collision}} \\ 
-= \\ 
-\alpha_c \\ 
-\exp\!\left[ \\ 
--\beta_c \\ 
-\left( \\ 
-\lVert\mathbf p_i-\mathbf p_{\mathrm{obs}}\rVert_2^2-D_s^2 \\ 
-\right) \\ 
+J_{\mathrm{collision}} \\
+= \\
+\alpha_c \\
+\exp\!\left[ \\
+-\beta_c \\
+\left( \\
+\lVert\mathbf p_i-\mathbf p_{\mathrm{obs}}\rVert_2^2-D_s^2 \\
+\right) \\
 \right]
 \end{equation}
 
@@ -1173,7 +1163,7 @@ J_{\mathrm{collision}} \\
 They are included here to distinguish available mathematical utilities from the active MPC objective.
 
 
-\section{11. Asynchronous estimation and causal order}
+\section{Asynchronous estimation and causal order}
 
 
 For a periodic event with period $P$, start time $t_0$, and fire count $k$, the next scheduled time is computed without accumulated drift:
@@ -1207,21 +1197,33 @@ At simulation step $n$, $t_n=n\Delta t$. The current coupled order is:
 Consequently, a HIGH sample collected at step $n$ can influence ground control at step $n$ after a successful update, but influences aerial control no earlier than step $n+1$.
 
 
+When video recording is enabled, it is an observer of this completed state:
+after each outer step, it may render the already-published posterior and the
+current aerial and ground positions. It captures only steps satisfying
+$n \bmod r=0$, where $r$ is the configured frame interval, and also captures
+the final completed step if it was not already selected. Rendering and encoding
+do not submit observations, update the estimator, or alter either controller.
+For one video, the uncertainty panel uses the fixed color interval
+$[0,\sigma_{\max}^{(0)}]$, where $\sigma_{\max}^{(0)}$ is the largest HIGH
+posterior standard deviation in its first captured frame; later frames reuse
+that interval rather than independently rescaling their colors.
+
+
 Estimator publication is transactional. A candidate update must complete retention, optional hyperparameter fitting, Cholesky factorization, prediction, positive-part conversion, and density validation before it replaces the cached posterior.
 
 
-\section{12. Evaluation quantities}
+\section{Evaluation quantities}
 
 
-\subsection{12.1 Current HEDAC coverage error}
+\subsection{Current HEDAC coverage error}
 
 
 The quantity reported by HEDAC as an ergodic metric is a discrete spatial $L^2$ difference. With sum-normalized cumulative coverage
 
 
 \begin{equation}
-\widehat C_j \\ 
-= \\ 
+\widehat C_j \\
+= \\
 \frac{C_j}{\sum_kC_k+\varepsilon}
 \end{equation}
 
@@ -1230,13 +1232,13 @@ the reported value is
 
 
 \begin{equation}
-E \\ 
-= \\ 
-\sqrt{ \\ 
-\sum_j \\ 
-\left[ \\ 
-M_j(\widehat C_j-\phi_j^{\mathrm{reference}}) \\ 
-\right]^2 \\ 
+E \\
+= \\
+\sqrt{ \\
+\sum_j \\
+\left[ \\
+M_j(\widehat C_j-\phi_j^{\mathrm{reference}}) \\
+\right]^2 \\
 }
 \end{equation}
 
@@ -1244,21 +1246,21 @@ M_j(\widehat C_j-\phi_j^{\mathrm{reference}}) \\
 This is not a Fourier-coefficient ergodic metric. In the present HEDAC step, $\phi^{\mathrm{reference}}$ is the original normalized goal field stored when HEDAC was constructed, not necessarily the latest external multi-fidelity aerial target. It should therefore be interpreted carefully in coupled runs.
 
 
-\subsection{12.2 Posterior reconstruction diagnostics}
+\subsection{Posterior reconstruction diagnostics}
 
 
 Useful field diagnostics include root mean squared error
 
 
 \begin{equation}
-\mathrm{RMSE} \\ 
-= \\ 
-\sqrt{ \\ 
-\frac{1}{N} \\ 
-\sum_{j=1}^{N} \\ 
-\left( \\ 
-\mu_H(\mathbf q_j)-f_H(\mathbf q_j) \\ 
-\right)^2 \\ 
+\mathrm{RMSE} \\
+= \\
+\sqrt{ \\
+\frac{1}{N} \\
+\sum_{j=1}^{N} \\
+\left( \\
+\mu_H(\mathbf q_j)-f_H(\mathbf q_j) \\
+\right)^2 \\
 }
 \end{equation}
 
@@ -1267,18 +1269,18 @@ and mean negative log predictive density, when evaluating against simulator trut
 
 
 \begin{equation}
-\mathrm{MNLPD} \\ 
-= \\ 
-\frac{1}{N} \\ 
-\sum_{j=1}^{N} \\ 
-\left[ \\ 
-\frac{1}{2}\log(2\pi\sigma_{H,j}^2) \\ 
-+ \\ 
-\frac{ \\ 
-\left(f_H(\mathbf q_j)-\mu_H(\mathbf q_j)\right)^2 \\ 
-}{ \\ 
-2\sigma_{H,j}^2 \\ 
-} \\ 
+\mathrm{MNLPD} \\
+= \\
+\frac{1}{N} \\
+\sum_{j=1}^{N} \\
+\left[ \\
+\frac{1}{2}\log(2\pi\sigma_{H,j}^2) \\
++ \\
+\frac{ \\
+\left(f_H(\mathbf q_j)-\mu_H(\mathbf q_j)\right)^2 \\
+}{ \\
+2\sigma_{H,j}^2 \\
+} \\
 \right]
 \end{equation}
 
@@ -1286,32 +1288,32 @@ and mean negative log predictive density, when evaluating against simulator trut
 These diagnostics use hidden truth only for evaluation; they are not controller inputs.
 
 
-\section{13. Legacy compatibility path}
+\section{Legacy compatibility path}
 
 
 When no central multi-fidelity posterior is supplied, the retained ground path can fuse separate aerial and ground GP estimates. Let $\bar\sigma_A,\bar\sigma_G$ be each standard-deviation field divided by its own maximum. The implemented weights are
 
 
 \begin{equation}
-d_j \\ 
-= \\ 
-\frac{1}{\bar\sigma_{G,j}+\varepsilon} \\ 
-+ \\ 
+d_j \\
+= \\
+\frac{1}{\bar\sigma_{G,j}+\varepsilon} \\
++ \\
 \frac{1}{\bar\sigma_{A,j}+\varepsilon}
 \end{equation}
 
 
 \begin{equation}
-\lambda_{A,j} \\ 
-= \\ 
-\frac{ \\ 
-1/(\bar\sigma_{A,j}+\varepsilon) \\ 
-}{d_j}, \\ 
-\qquad \\ 
-\lambda_{G,j} \\ 
-= \\ 
-\frac{ \\ 
-1/(\bar\sigma_{G,j}+\varepsilon) \\ 
+\lambda_{A,j} \\
+= \\
+\frac{ \\
+1/(\bar\sigma_{A,j}+\varepsilon) \\
+}{d_j}, \\
+\qquad \\
+\lambda_{G,j} \\
+= \\
+\frac{ \\
+1/(\bar\sigma_{G,j}+\varepsilon) \\
 }{d_j}
 \end{equation}
 
@@ -1320,10 +1322,10 @@ and
 
 
 \begin{equation}
-\mu_{\mathrm{fused},j} \\ 
-= \\ 
-\lambda_{A,j}\mu_{A,j} \\ 
-+ \\ 
+\mu_{\mathrm{fused},j} \\
+= \\
+\lambda_{A,j}\mu_{A,j} \\
++ \\
 \lambda_{G,j}\mu_{G,j}
 \end{equation}
 
@@ -1331,7 +1333,7 @@ and
 This is a compatibility fallback, not the central autoregressive GP. In multi-fidelity mode the controllers consume the shared posterior products defined in Section 5.
 
 
-\section{14. Equation-to-code map}
+\section{Equation-to-code map}
 
 
 \begin{longtable}{p{0.34\textwidth} p{0.56\textwidth}}
@@ -1349,6 +1351,7 @@ Autoregressive GP and marginal likelihood & \href{../src/core/multifidelity_gp.p
 Asynchronous estimator and posterior publication & \href{../src/core/multifidelity_estimator.py}{\texttt{\detokenize{src/core/multifidelity_estimator.py}}} \\
 Density clipping, normalization, and aerial target & \href{../src/core/density.py}{\texttt{\detokenize{src/core/density.py}}} \\
 Event schedule and controller-density caching & \href{../src/simulation.py}{\texttt{\detokenize{src/simulation.py}}} \\
+Video observer and encoding & \href{../src/utils/multifidelity_video.py}{\texttt{\detokenize{src/utils/multifidelity_video.py}}}, \href{../examples/run_multifidelity.py}{\texttt{\detokenize{examples/run_multifidelity.py}}} \\
 HEDAC source, heat update, and gradient law & \href{../src/core/hedac.py}{\texttt{\detokenize{src/core/hedac.py}}}, \href{../src/utils/math_utils.py}{\texttt{\detokenize{src/utils/math_utils.py}}} \\
 Dubins and unicycle state updates & \href{../src/models/agents.py}{\texttt{\detokenize{src/models/agents.py}}} \\
 MPC prediction dynamics & \href{../src/models/models.py}{\texttt{\detokenize{src/models/models.py}}} \\
