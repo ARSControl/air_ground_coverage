@@ -82,6 +82,8 @@ visualization:
   save_video: false            # Save video of simulation
   video_fps: 30                # Video frames per second
   video_path: "output/hedac_simulation.mp4"
+  save_final_plot: false       # Save final trajectories and GP summary
+  final_plot_path: "output/multifidelity_final_state.png"
   gp_debug: true              # Enable GP debug visualization
   gp_debug_interval: 100        # Plot every N steps
   save_gp_frames: true        # Save GP frames instead of showing

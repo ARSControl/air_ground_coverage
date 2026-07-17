@@ -1,6 +1,8 @@
 # HEDAC Configuration Schema
 # This file defines the structure and defaults for HEDAC parameters
 
+estimator_mode: legacy
+
 # Simulation Parameters
 simulation:
   num_steps: 300              # Number of simulation steps

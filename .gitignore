@@ -14,3 +14,8 @@ output/*
 !output/.gitkeep
 *.png
 *.npz
+
+# Coding agents files
+AGENTS.md
+docs/architecture/
+prompts/

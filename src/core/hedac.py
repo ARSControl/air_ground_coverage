@@ -4,7 +4,7 @@ Main HEDAC algorithm implementation.
 
 import os
 import numpy as np
-from typing import Optional, List, Dict, Any, Tuple, cast
+from typing import Optional, List, Dict, Any
 
 from ..core.base import HEDACParams, MapLoader, compute_ergodic_metric
 from ..core.GaussianProcess import GaussianProcess
@@ -14,7 +14,6 @@ from ..utils.math_utils import (
     create_agent_block,
     clamp_kernel_1d,
     normalize_to_pdf,
-    min_max_normalize,
 )
 from ..models.agents import AgentLike, AgentTeam
 from ..utils.visualize_gp import visualize_gp_debug
@@ -283,7 +282,36 @@ class HEDACAlgorithm:
         else:
             self.current_goal_density = self.goal_density
 
-    def step(self, agent_team: AgentTeam, step_num: int = 0) -> float:
+    def _validate_external_goal_density(
+        self, external_goal_density: np.ndarray
+    ) -> np.ndarray:
+        """Validate and normalize a controller target on the HEDAC map."""
+        try:
+            candidate = np.asarray(external_goal_density, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("external_goal_density must be numeric") from exc
+        if candidate.shape != self.map.shape:
+            raise ValueError(
+                "external_goal_density must match the HEDAC map shape; "
+                f"got {candidate.shape} and {self.map.shape}"
+            )
+        if not np.all(np.isfinite(candidate)):
+            raise ValueError("external_goal_density must contain only finite values")
+        if np.any(candidate < 0.0):
+            raise ValueError("external_goal_density must be nonnegative")
+        free_mass = float(np.sum(candidate[self.map == 0], dtype=float))
+        if not np.isfinite(free_mass) or free_mass <= 0.0:
+            raise ValueError("external_goal_density must have positive free-space mass")
+        return normalize_to_pdf(np.array(candidate, copy=True), self.map)
+
+    def step(
+        self,
+        agent_team: AgentTeam,
+        step_num: int = 0,
+        *,
+        external_goal_density: np.ndarray | None = None,
+        update_legacy_gp: bool = True,
+    ) -> float:
         """
         Execute one step of HEDAC algorithm.
 
@@ -293,9 +321,25 @@ class HEDACAlgorithm:
         Returns:
             Current ergodic metric
         """
-        # Collect observations and update GP
-        new_observations = self.collect_observations(agent_team)
-        self.update_gp(new_observations, step_num=step_num)
+        if not isinstance(update_legacy_gp, (bool, np.bool_)):
+            raise TypeError("update_legacy_gp must be boolean")
+        external_target = None
+        if external_goal_density is not None:
+            external_target = self._validate_external_goal_density(
+                external_goal_density
+            )
+
+        if update_legacy_gp:
+            new_observations = self.collect_observations(agent_team)
+            self.update_gp(new_observations, step_num=step_num)
+        elif external_target is None:
+            # Multifidelity fallback before the first valid posterior.
+            self.current_goal_density = self.goal_density.copy()
+
+        # Apply after a possible legacy update so it cannot be overwritten by
+        # update_gp(). This is the only control-law seam used by multifidelity mode.
+        if external_target is not None:
+            self.current_goal_density = external_target
 
         # Reset local cooling
         self.local_cooling = np.zeros_like(self.map, dtype=float)
