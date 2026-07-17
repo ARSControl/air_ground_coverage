@@ -90,7 +90,7 @@ runtime effects—is in
 ## How the coupled loop works
 
 1. Aerial and ground sensors collect area-uniform samples in their configured
-   fields of view.
+   fields of view. 
 2. The simulation timestamps and submits observations to the central estimator.
 3. On scheduled estimator updates, the GP fits the joint LOW/HIGH observation
    model and publishes a versioned HIGH-field posterior.
