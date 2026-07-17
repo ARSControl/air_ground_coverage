@@ -91,7 +91,7 @@ aerial:
     num_agents: 2
   agents:
     model_type: dubins
-    max_velocity: 3.0
+    max_velocity: 5.0
     max_acceleration: 0.5
     max_angular_velocity: 0.785
     max_angular_acceleration: 0.393
@@ -132,7 +132,7 @@ ground:
     obstacles_radius: 1.0
   agents:
     model_type: unicycle
-    max_velocity: 4.0
+    max_velocity: 2.0
     max_acceleration: 2.5
     max_angular_velocity: 5.0
     max_angular_acceleration: 3.0

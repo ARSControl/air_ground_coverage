@@ -348,7 +348,7 @@ class MultifidelitySimulationCoordinator:
                 points,
             )
         if exact_snapshot_grid and exact_snapshot_weights:
-            density = snapshot.density
+            density = np.array(snapshot.density, dtype=float, copy=True)
         else:
             density = normalize_nonnegative_density(
                 projected,
