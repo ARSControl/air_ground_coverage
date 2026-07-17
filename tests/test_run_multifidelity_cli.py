@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from examples.run_multifidelity import run_with_progress
+from examples.run_multifidelity import run_with_progress, video_recorder_if_requested
+from src.core.base import HEDACParams
 
 
 class FakeSimulation:
@@ -17,6 +18,7 @@ class FakeSimulation:
     def step(self, step_num: int):
         self.steps.append(step_num)
         return SimpleNamespace(
+            step_num=step_num,
             simulation_time=step_num * 0.1,
             posterior_version=step_num // 5,
             aerial_density_source="multifidelity_high_posterior",
@@ -51,6 +53,39 @@ def test_zero_interval_disables_progress_without_disabling_simulation() -> None:
     run_with_progress(simulation, 3, 0, messages.append)
     assert simulation.steps == [0, 1, 2]
     assert messages == []
+
+
+def test_completed_step_callback_observes_every_completed_step() -> None:
+    simulation = FakeSimulation()
+    observed_steps: list[int] = []
+    run_with_progress(
+        simulation,
+        3,
+        0,
+        on_completed_step=lambda result: observed_steps.append(result.step_num),
+    )
+    assert observed_steps == [0, 1, 2]
+
+
+def test_video_recorder_uses_active_visualization_values(tmp_path) -> None:
+    output_path = tmp_path / "run.gif"
+    recorder = video_recorder_if_requested(
+        HEDACParams.from_dict(
+            {
+                "visualization": {
+                    "save_video": True,
+                    "video_fps": 11,
+                    "video_frame_interval": 3,
+                    "video_path": str(output_path),
+                }
+            }
+        )
+    )
+    assert recorder is not None
+    assert recorder.output_path == output_path
+    assert recorder.fps == 11
+    assert recorder.frame_interval == 3
+    assert recorder.close() is None
 
 
 @pytest.mark.parametrize(

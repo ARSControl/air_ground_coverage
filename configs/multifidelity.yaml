@@ -29,7 +29,8 @@ visualization:
   plot_frequency: 10
   save_video: true
   video_fps: 30
-  video_path: output/multifidelity_simulation.mp4
+  video_frame_interval: 10
+  video_path: output/multifidelity_simulation.gif
   save_final_plot: true
   final_plot_path: output/multifidelity_final_state.png
   gp_debug: false
@@ -60,10 +61,11 @@ multifidelity:
   max_jitter_attempts: 5
   jitter_multiplier: 10.0
   retention:
-    max_low_samples: 250
-    max_high_samples: 250
+    max_low_samples: 500
+    max_high_samples: 500
     min_low_separation: 0.25
     min_high_separation: 0.10
+    take_threshold: 0.15
   aerial_target:
     lambda_interest: 1.0
     lambda_uncertainty: 0.25
@@ -86,7 +88,7 @@ multifidelity:
 
 aerial:
   simulation:
-    num_agents: 3
+    num_agents: 2
   agents:
     model_type: dubins
     max_velocity: 3.0
@@ -125,7 +127,7 @@ ground:
   controller:
     type: lloyd
   simulation:
-    num_agents: 7
+    num_agents: 5
     num_obstacles: 0
     obstacles_radius: 1.0
   agents:
@@ -135,12 +137,12 @@ ground:
     max_angular_velocity: 5.0
     max_angular_acceleration: 3.0
     dt_agent: 0.1
-    agent_radius: 7.0
+    agent_radius: 5.0
     min_kernel_val: 0.000001
     wall_avoidance_weight: 1.0
   sensor:
-    fov_degrees: 360.0
-    fov_depth: 7.0
+    fov_degrees: 90.0
+    fov_depth: 5.0
   multi_agent:
     sensing_range: 10.0
     min_safe_distance: 1.0

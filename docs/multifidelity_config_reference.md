@@ -2,7 +2,7 @@
 
 This document describes every leaf parameter in the canonical coupled
 configuration, its current runtime scope, and the expected effect of changing
-it. It reflects the implementation as of 2026-07-16, including parameters that
+it. It reflects the implementation as of 2026-07-17, including parameters that
 are retained for legacy compatibility but are not currently wired into the
 multifidelity runner.
 
@@ -58,9 +58,10 @@ The implemented update is approximately
 | Parameter | Current value | Status | Meaning | Expected effect when changed |
 |---|---:|---|---|---|
 | `visualization.plot_frequency` | `10` | Inactive | Intended interval for interactive/intermediate plots. | No current effect in the coupled CLI. |
-| `visualization.save_video` | `true` | Inactive | Requests video recording. | No video renderer is implemented; `true` only causes an explicit CLI warning. |
-| `visualization.video_fps` | `30` | Inactive | Intended output video frame rate. | No current effect until video recording exists. |
-| `visualization.video_path` | `output/multifidelity_simulation.mp4` | Inactive | Intended video destination. | No current effect until video recording exists. |
+| `visualization.save_video` | `true` | MF active | Enables frame recording after completed coupled-loop steps. | `false` avoids all video rendering/encoding work; it does not affect sensing, estimation, or control. |
+| `visualization.video_fps` | `30` | MF active | Encoded playback rate in frames per second. | Higher plays the same captured states faster unless the frame interval is changed; it does not change simulated time. |
+| `visualization.video_frame_interval` | `10` | MF active | Number of completed outer steps between rendered frames; the final completed step is always included. | Higher reduces rendering/encoding cost and temporal detail; lower gives smoother playback but adds observer-only work. |
+| `visualization.video_path` | `output/multifidelity_simulation.gif` | MF active | Video destination. `.gif` uses Pillow; MP4/MOV/M4V/AVI require `ffmpeg`. | Path/suffix selects output location and encoder only; it does not affect simulation behavior. |
 | `visualization.save_final_plot` | `true` | MF active | Enables the four-panel final posterior/trajectory PNG. | `false` skips rendering and reduces end-of-run work. CLI `--no-plot` also overrides it. |
 | `visualization.final_plot_path` | `output/multifidelity_final_state.png` | MF active | Destination for the final-state PNG. | Path only; changing it does not affect simulation behavior. |
 | `visualization.gp_debug` | `false` | Both | Enables HEDAC GP-debug frames during HEDAC steps. | `true` adds plotting overhead. In MF mode the legacy aerial GP is not updated, so these are not the central-GP milestone plots. |
@@ -103,6 +104,7 @@ posterior uncertainty enters only through the separate aerial uncertainty term.
 | `multifidelity.retention.max_high_samples` | `250` | MF active | Maximum retained HIGH observations. | Same tradeoff as LOW; too low can discard important local corrections. |
 | `multifidelity.retention.min_low_separation` | `0.25` | MF active | Minimum spatial distance between retained LOW points (newest candidates selected first). | Higher favors spatial diversity and fewer clustered points; lower retains denser local samples and can worsen conditioning. |
 | `multifidelity.retention.min_high_separation` | `0.10` | MF active | Minimum spatial distance between retained HIGH points. | Higher spreads retained corrections spatially; lower preserves fine local ground detail but admits more near-duplicates. |
+| `multifidelity.retention.take_threshold` | `0.15` | MF active | Legacy-style normalized-HIGH-uncertainty admission threshold for new LOW/HIGH observations. Existing retained observations are never removed by this filter. | Higher rejects more observations from explored regions; lower accepts more data. `null` disables admission filtering. |
 | `multifidelity.aerial_target.lambda_interest` | `1.0` | MF active | Weight on normalized estimated HIGH density in the HEDAC target. | Higher relative to uncertainty favors exploiting estimated important regions. Multiplying both lambdas by the same factor has no effect after normalization. |
 | `multifidelity.aerial_target.lambda_uncertainty` | `0.25` | MF active | Weight on spatially normalized HIGH posterior standard deviation. | Higher relative to interest promotes exploration of uncertain regions; zero disables uncertainty-driven visitation. |
 | `multifidelity.density.normalization_tolerance` | `1e-8` | MF active | Relative/absolute tolerance when checking weighted density integral equals one. | Higher accepts larger floating-point normalization error; lower is stricter and may reject numerically harmless deviations. It does not smooth the field. |

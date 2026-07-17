@@ -1,0 +1,135 @@
+# Self-contained one-aerial/one-ground configuration for visual validation.
+estimator_mode: multifidelity
+
+simulation:
+  num_steps: 12
+  dt: 0.1
+  random_seed: 77
+  num_episodes: 1
+
+map:
+  size: [9, 9]
+  resolution: 1.0
+
+goal_density:
+  type: gaussian_mixture
+  num_peaks: 2
+
+heat_equation:
+  alpha: 0.1
+  source_strength: 1.0
+  beta: 0.01
+  local_cooling: 0.1
+  cfl_safety: 0.9
+
+visualization:
+  save_video: true
+  video_fps: 5
+  video_frame_interval: 3
+  video_path: docs/assets/multifidelity_video_recording_milestone.gif
+  save_final_plot: false
+  final_plot_path: output/multifidelity_video_smoke_final_state.png
+  gp_debug: false
+
+output:
+  verbose: false
+  print_frequency: 10
+
+multifidelity:
+  rho: 0.8
+  gp_update_period: 0.2
+  aerial_sensor_period: 0.2
+  ground_sensor_period: 0.1
+  low_kernel:
+    length_scale: 2.0
+    variance: 1.0
+  discrepancy_kernel:
+    length_scale: 0.8
+    variance: 0.3
+  low_noise_variance: 0.01
+  high_noise_variance: 0.001
+  jitter: 1.0e-9
+  max_jitter_attempts: 5
+  jitter_multiplier: 10.0
+  retention:
+    max_low_samples: 20
+    max_high_samples: 20
+    min_low_separation: 0.0
+    min_high_separation: 0.0
+  aerial_target:
+    lambda_interest: 1.0
+    lambda_uncertainty: 0.25
+  density:
+    normalization_tolerance: 1.0e-9
+  sensor:
+    low_fidelity_smoothing_sigma_cells: 1.0
+    random_seed_offset: 100
+  hyperparameter_optimization:
+    enabled: true
+    fit_interval_updates: 5
+    min_samples: 20
+    num_restarts: 0
+    max_iterations: 75
+    bounds:
+      low_length_scale: [0.3, 5.0]
+      low_variance: [0.05, 3.0]
+      discrepancy_length_scale: [0.2, 3.0]
+      discrepancy_variance: [0.01, 2.0]
+
+aerial:
+  simulation:
+    num_agents: 1
+  agents:
+    model_type: double_integrator
+    max_velocity: 1.0
+    max_acceleration: 0.5
+    max_angular_velocity: 0.785
+    max_angular_acceleration: 0.393
+    dt_agent: 0.1
+    agent_radius: 1.0
+    min_kernel_val: 0.01
+    wall_avoidance_weight: 0.5
+  sensor:
+    fov_degrees: 360.0
+    fov_depth: 2.0
+  multi_agent:
+    sensing_range: 3.0
+    min_safe_distance: 0.5
+  gpr:
+    obs_per_step: 2
+    obs_noise_std: 0.0
+    min_samples: 100
+    use_filter: false
+    fit_interval: 10
+
+ground:
+  controller:
+    type: mpc
+  simulation:
+    num_agents: 1
+  agents:
+    model_type: unicycle
+    max_velocity: 1.0
+    max_acceleration: 0.5
+    max_angular_velocity: 1.0
+    max_angular_acceleration: 1.0
+    dt_agent: 0.1
+    agent_radius: 1.0
+    min_kernel_val: 0.01
+  sensor:
+    fov_degrees: 90.0
+    fov_depth: 2.0
+  multi_agent:
+    sensing_range: 3.0
+    min_safe_distance: 0.5
+  gpr:
+    obs_per_step: 1
+    obs_noise_std: 0.01
+    min_samples: 10
+  map:
+    local_grid_points: 9
+  mpc:
+    horizon: 2
+    tolerance: 1.0e-5
+    max_iterations: 80
+    print_time: false

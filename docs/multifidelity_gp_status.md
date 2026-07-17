@@ -2,13 +2,13 @@
 
 ## Current Milestone
 
-The LaTeX mathematical-reference and GitHub Pages publication milestone is
-**implemented locally on 2026-07-17**. The canonical typeset source is
-`docs/latex/mathematical_formulation.tex`; the Markdown file is now a compact
-landing page. The GitHub Actions workflow compiles a PDF for pull-request
-artifacts and deploys the same PDF to GitHub Pages only after pushes to `main`.
-Local structural checks pass. PDF compilation remains pending the first GitHub
-Actions run because this workspace has no LaTeX engine.
+The observer-only coupled-video recording milestone is **complete and verified
+on 2026-07-17**. A fixed-seed 12-step coupled smoke run produced and was
+visually inspected as `docs/assets/multifidelity_video_recording_milestone.gif`.
+The canonical configuration now defaults to GIF output, while optional MP4
+output remains available when `ffmpeg` is installed. The separate LaTeX/PDF
+publication workflow remains locally structurally verified and awaits its first
+GitHub Actions compilation.
 
 ## Completed Work
 
@@ -120,6 +120,10 @@ Actions run because this workspace has no LaTeX engine.
 - Added a persistent `AGENTS.md` rule requiring every future mathematical or
   numerical behavior change to update `docs/mathematical_formulation.md` in the
   same milestone.
+- Added an opt-in post-step multi-fidelity video recorder with configurable
+  frame interval, playback rate, and GIF/ffmpeg encoding. Rendering observes
+  published posterior products and robot positions only; it has no feedback
+  path into sensing, estimation, control, or dynamics.
 - Updated the living mathematical reference and affected implementation diagram
   to describe the single active sampling law.
 - Added and visually inspected a deterministic single-law diagnostic for sector
@@ -1089,11 +1093,10 @@ target architecture, estimator, controllers, and robot dynamics are unchanged.
   valid snapshot exists, controller startup fallback behavior remains active.
 - The production 50x50/100x100, seven-ground-robot configuration has not yet
   received a runtime benchmark; fast CLI validation uses explicit smoke files.
-- The new coupled multifidelity CLI does not yet own a renderer or frame
-  recorder for intermediate frames. Therefore `visualization.save_video: true`
-  still cannot produce a video; the CLI reports this explicitly. The new final
-  renderer produces one end-of-run PNG instead. Live textual progress is
-  available through `--log-every` and defaults to every 10 steps.
+- Video encoding depends on the selected suffix: the canonical `.gif` path uses
+  Pillow and has been validated. MP4/MOV/M4V/AVI require an `ffmpeg` executable
+  visible to Matplotlib; this workspace has no `ffmpeg`, so those encoders are
+  intentionally not claimed as locally validated.
 - Obstacle-aware fidelity smoothing is implemented, but the current production
   configurations are obstacle-free and no query-grid obstacle-mask resampling
   is performed by the builder yet.
@@ -1174,3 +1177,32 @@ committed: pull requests upload it as a 30-day workflow artifact, and a push to
   rendering verification remains pending the GitHub Pages PDF build.
 - Numerical and behavioral regressions: none expected; this milestone changes
   documentation and publishing automation only.
+
+## Video recording milestone
+
+- Files changed: `src/utils/multifidelity_video.py`,
+  `examples/run_multifidelity.py`, `configs/multifidelity.yaml`,
+  `configs/multifidelity_video_smoke.yaml`,
+  `tests/test_multifidelity_video.py`, `tests/test_run_multifidelity_cli.py`,
+  `docs/multifidelity_config_reference.md`,
+  `docs/latex/mathematical_formulation.tex`,
+  `docs/architecture/implementation_video_recording.md`, this status document,
+  and the video-recording milestone visual assets.
+- Regeneration commands: `python3 examples/plot_video_recording_milestone.py`
+  for the observer-flow SVG, and `PYTHONPATH=. MPLCONFIGDIR=/tmp/matplotlib-codex
+  .venv/bin/python -m examples.run_multifidelity --config
+  configs/multifidelity_video_smoke.yaml --no-plot` for the real GIF.
+  The SVG shows the completed-step observer flow, interval gate, renderer, and
+  encoder, including the intentional absence of a feedback path to the loop.
+- Validation: the new deterministic recorder tests use a fake writer and assert
+  interval sampling, final-frame forcing, duplicate prevention, and no-output
+  behavior before a valid posterior. `ruff` passed and 11 focused tests passed.
+  The real 12-step smoke run completed with posterior version `6`, final
+  ergodic metric `0.538776926363`, and a nonempty 1600x720 GIF. Its frame was
+  visually inspected for labels, clipping, and both robot classes.
+- Numerical and behavioral regressions: none expected. The recorder runs after
+  completed steps and cannot affect the mathematical model or controller state.
+- Video-scale refinement: the HIGH-posterior uncertainty color range is now
+  fixed from the first captured frame through the end of that video. This is a
+  visualization-only change; the published variance array and all estimator
+  behavior remain unchanged.

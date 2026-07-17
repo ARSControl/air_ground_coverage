@@ -150,6 +150,7 @@ class MultifidelitySimulationCoordinator:
         lambda_interest: float,
         lambda_uncertainty: float,
         normalization_tolerance: float,
+        observation_take_threshold: float | None = None,
     ) -> None:
         if not isinstance(estimator, CentralAsynchronousEstimator):
             raise TypeError("estimator must be a CentralAsynchronousEstimator")
@@ -174,6 +175,11 @@ class MultifidelitySimulationCoordinator:
             raise ValueError("at least one aerial-target weight must be positive")
         self.normalization_tolerance = _positive_float(
             normalization_tolerance, "normalization_tolerance"
+        )
+        self.observation_take_threshold = (
+            None
+            if observation_take_threshold is None
+            else _unit_interval(observation_take_threshold, "observation_take_threshold")
         )
         self._cached_aerial_target: np.ndarray | None = None
         self._cached_aerial_target_version = 0
@@ -418,7 +424,9 @@ class MultifidelitySimulationCoordinator:
             return CoordinatorEventReport(
                 event_type, timestamp, False, 0, None, self.estimator.version
             )
-        observations = sensor.collect(team, field, timestamp)
+        observations = self._filter_new_observations(
+            sensor.collect(team, field, timestamp)
+        )
         submitted_count = self.estimator.submit_many(observations)
         event.mark_fired()
         return CoordinatorEventReport(
@@ -428,6 +436,31 @@ class MultifidelitySimulationCoordinator:
             submitted_count,
             None,
             self.estimator.version,
+        )
+
+    def _filter_new_observations(self, observations):
+        """Use legacy uncertainty admission without deleting retained samples."""
+        if self.observation_take_threshold is None or not observations:
+            return observations
+        snapshot = self.latest_posterior
+        if snapshot is None:
+            return observations
+        standard_deviation = np.sqrt(np.maximum(snapshot.high_variance, 0.0))
+        minimum = float(np.min(standard_deviation))
+        span = float(np.max(standard_deviation) - minimum)
+        if span <= 1.0e-10:
+            return ()
+        normalized = (standard_deviation - minimum) / span
+        positions = np.asarray([observation.position for observation in observations])
+        distances = np.sum(
+            (positions[:, None, :] - snapshot.query_points[None, :, :]) ** 2,
+            axis=2,
+        )
+        uncertainty = normalized[np.argmin(distances, axis=1)]
+        return tuple(
+            observation
+            for observation, value in zip(observations, uncertainty, strict=True)
+            if value > self.observation_take_threshold
         )
 
 
@@ -620,6 +653,9 @@ def build_multifidelity_coordinator(
         normalization_tolerance=float(
             _get(params, "multifidelity.density.normalization_tolerance", 1.0e-8)
         ),
+        observation_take_threshold=_get(
+            params, "multifidelity.retention.take_threshold", None
+        ),
     )
 
 
@@ -768,4 +804,11 @@ def _nonnegative_float(value: float, name: str) -> float:
     result = _finite_float(value, name)
     if result < 0.0:
         raise ValueError(f"{name} must be nonnegative")
+    return result
+
+
+def _unit_interval(value: float, name: str) -> float:
+    result = _nonnegative_float(value, name)
+    if result > 1.0:
+        raise ValueError(f"{name} must be at most one")
     return result

@@ -6,10 +6,14 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+import sys
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.core.base import HEDACParams
 from src.coupled_config import load_coupled_configuration
 from src.coupled_simulation import build_coupled_simulation
+from src.utils.multifidelity_video import MultifidelityVideoRecorder
 
 from examples.plot_final_multifidelity_state import (
     render_final_multifidelity_state,
@@ -52,6 +56,7 @@ def run_with_progress(
     number_of_steps: int,
     log_every: int,
     emit: Callable[[str], None] = print,
+    on_completed_step: Callable[[Any], None] | None = None,
 ):
     """Run one simulation while emitting deterministic step summaries."""
     for value, name in (
@@ -64,6 +69,8 @@ def run_with_progress(
             raise ValueError(f"{name} must be nonnegative")
     for step_num in range(number_of_steps):
         step_result = simulation.step(step_num)
+        if on_completed_step is not None:
+            on_completed_step(step_result)
         completed = step_num + 1
         if log_every > 0 and (
             completed % log_every == 0 or completed == number_of_steps
@@ -74,6 +81,27 @@ def run_with_progress(
                 f"ergodic_metric={step_result.ergodic_metric:.12g}"
             )
     return simulation.run(0)
+
+
+def video_recorder_if_requested(params: HEDACParams) -> MultifidelityVideoRecorder | None:
+    """Build an independent recorder from active visualization configuration."""
+    enabled = params.get("visualization.save_video", False)
+    if not isinstance(enabled, bool):
+        raise TypeError("visualization.save_video must be a boolean")
+    if not enabled:
+        return None
+    fps = params.get("visualization.video_fps", 30)
+    interval = params.get("visualization.video_frame_interval", 10)
+    output_path = params.get(
+        "visualization.video_path", "output/multifidelity_simulation.gif"
+    )
+    if not isinstance(output_path, (str, Path)) or not str(output_path):
+        raise ValueError("visualization.video_path must be a nonempty path")
+    return MultifidelityVideoRecorder(
+        output_path,
+        fps=fps,
+        frame_interval=interval,
+    )
 
 
 def save_final_plot_if_requested(
@@ -131,18 +159,42 @@ def main() -> None:
         f"log_every={arguments.log_every}",
         flush=True,
     )
-    if bool(aerial_params.get("visualization.save_video", False)):
-        print(
-            "note=visualization.save_video is not implemented by the "
-            "multifidelity CLI; no video will be written",
-            flush=True,
+    recorder = video_recorder_if_requested(aerial_params)
+    result = None
+    video_path = None
+    try:
+        result = run_with_progress(
+            simulation,
+            number_of_steps,
+            arguments.log_every,
+            lambda message: print(message, flush=True),
+            on_completed_step=(
+                None
+                if recorder is None
+                else lambda step: recorder.capture(
+                    step.step_num,
+                    step.simulation_time,
+                    simulation.latest_posterior,
+                    simulation.aerial_team.get_positions(),
+                    simulation.ground_team.get_positions(),
+                )
+            ),
         )
-    result = run_with_progress(
-        simulation,
-        number_of_steps,
-        arguments.log_every,
-        lambda message: print(message, flush=True),
-    )
+        if recorder is not None and result.step_results:
+            final_step = result.step_results[-1]
+            recorder.capture(
+                final_step.step_num,
+                final_step.simulation_time,
+                simulation.latest_posterior,
+                simulation.aerial_team.get_positions(),
+                simulation.ground_team.get_positions(),
+                force=True,
+            )
+    finally:
+        if recorder is not None:
+            video_path = recorder.close()
+    if result is None:
+        raise RuntimeError("simulation did not return a result")
     print(f"mode={simulation.mode.value}")
     print(f"steps={len(result.step_results)}")
     print(f"posterior_version={result.final_posterior_version}")
@@ -159,6 +211,11 @@ def main() -> None:
             f"{snapshot.discrepancy_kernel_length_scale:.12g}, "
             f"{snapshot.discrepancy_kernel_variance:.12g})"
         )
+    if recorder is not None:
+        if video_path is None:
+            print("note=video skipped because no valid posterior was published")
+        else:
+            print(f"video={video_path}")
         print(
             "hyperparameter_fit_performed_last_update="
             f"{snapshot.hyperparameter_fit_performed}"
