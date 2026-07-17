@@ -16,6 +16,15 @@ output/*
 *.npz
 *.svg
 
+# Latex-generated files
+docs/latex/*.aux
+docs/latex/*.fdb_latexmk
+docs/latex/*.fls
+docs/latex/*.log
+docs/latex/*.out
+docs/latex/*.synctex.gz
+docs/latex/*.pdf
+
 # Coding agents files
 AGENTS.md
 docs/architecture/
