@@ -1,6 +1,12 @@
-# Canonical self-contained configuration for the coupled multi-fidelity run.
-# Shared settings are inherited by both robot classes; aerial/ground sections
-# override only the values specific to their sensors, dynamics, and controllers.
+# Publication-scale ablation configuration.
+#
+# This mirrors configs/multifidelity.yaml except for the experimental protocol:
+# - 20 paired episodes are the default publication minimum;
+# - HIGH-dependent observation admission is disabled;
+# - GP hyperparameter fitting is disabled.
+#
+# The last two changes are required to isolate no_discrepancy and
+# no_high_to_aerial without indirect HIGH-information pathways.
 
 estimator_mode: multifidelity
 
@@ -8,7 +14,7 @@ simulation:
   num_steps: 200
   dt: 0.1
   random_seed: 42
-  num_episodes: 1
+  num_episodes: 20
 
 map:
   size: [50, 50]
@@ -65,7 +71,7 @@ multifidelity:
     max_high_samples: 500
     min_low_separation: 0.25
     min_high_separation: 0.10
-    take_threshold: 0.15
+    take_threshold: null
   aerial_target:
     lambda_interest: 1.0
     lambda_uncertainty: 0.25
@@ -75,7 +81,7 @@ multifidelity:
     low_fidelity_smoothing_sigma_cells: 2.0
     random_seed_offset: 10000
   hyperparameter_optimization:
-    enabled: true
+    enabled: false
     fit_interval_updates: 5
     min_samples: 40
     num_restarts: 1

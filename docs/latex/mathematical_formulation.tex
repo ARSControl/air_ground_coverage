@@ -1288,6 +1288,156 @@ and mean negative log predictive density, when evaluating against simulator trut
 These diagnostics use hidden truth only for evaluation; they are not controller inputs.
 
 
+\subsection{Footprint-normalized ground coverage effectiveness}
+
+
+Let $\phi_j$ denote the hidden normalized truth density at query point $j$,
+with integration weight $w_j$. The raw probability mass visible through the
+union of the instantaneous ground sensing sectors is
+
+
+\begin{equation}
+M_{\mathrm{vis}}(t)
+=
+\sum_{j:\,\mathbf q_j\in\cup_i F_i(t)} \phi_j w_j.
+\end{equation}
+
+
+For $N_g$ ground robots, sensing radius $R$, and field-of-view angle $\theta$
+in radians, one ideal sector has area $\theta R^2/2$. The fixed episode area
+budget is
+
+
+\begin{equation}
+A_B
+=
+\min\left(
+A_{\mathrm{free}},
+N_g\frac{\theta R^2}{2}
+\right),
+\qquad
+A_{\mathrm{free}}=\sum_{j\in\mathcal Q_{\mathrm{free}}}w_j.
+\end{equation}
+
+
+The discrete densest-area oracle is
+
+
+\begin{equation}
+M_\star(A_B)
+=
+\max_{0\le z_j\le 1}
+\sum_{j\in\mathcal Q_{\mathrm{free}}}z_j\phi_jw_j,
+\qquad
+\sum_{j\in\mathcal Q_{\mathrm{free}}}z_jw_j\le A_B.
+\end{equation}
+
+
+The implementation solves this fractional selection exactly by sorting free
+cells in decreasing order of $\phi_j$, accepting whole cells until the budget
+is reached, and accepting the necessary fraction of the final cell. The
+reported score is
+
+
+\begin{equation}
+E_{\mathrm{cov}}(t)
+=
+\frac{M_{\mathrm{vis}}(t)}{M_\star(A_B)}.
+\end{equation}
+
+
+The denominator is fixed within an episode. It relaxes sector geometry and is
+therefore an optimistic upper bound for the same nominal sensing area. Actual
+footprint overlap, boundary clipping, obstacle clipping, and poor placement
+reduce the numerator. The evaluator saves both $M_{\mathrm{vis}}$ and
+$E_{\mathrm{cov}}$; only hidden truth is used, and neither quantity feeds back
+to a controller.
+
+
+\subsection{Separate Egerstedt comparison baseline}
+
+
+The comparison baseline uses the saved obstacle-free scenario but calls only
+the control functions in \texttt{evaluation/egerstedt.py}. It assumes the
+hidden truth $\phi_j$ is known. For aerial robot $a$, let $V^A_a$ be its
+range-limited Euclidean Voronoi set and let $c^A_a$ be the unweighted centroid
+of its query-grid points. The implemented discrete aerial update is
+
+
+\begin{equation}
+p^A_{a,k+1}
+=
+p^A_{a,k}
++
+\Delta t\,0.5\left(c^A_{a,k}-p^A_{a,k}\right).
+\end{equation}
+
+
+Each ground robot computes the truth-density-weighted centroid $c^G_i$ of its
+own range-limited Voronoi set. Ground robots are assigned to their nearest
+aerial robot. If $n_a$ is the number assigned to aerial cell $a$, the code
+computes
+
+
+\begin{equation}
+\sigma_a
+=
+\frac{n_a}{N_g}
+-
+\frac{\sum_{j\in V^A_a}\phi_j}{\sum_j\phi_j},
+\qquad
+\widehat\sigma_a
+=
+\begin{cases}
+\sigma_a,&\sigma_a>1/N_g,\\
+0,&\text{otherwise}.
+\end{cases}
+\end{equation}
+
+
+Let $a^- = \arg\min_a\sigma_a$ and let $a(i)$ be the aerial cell containing
+ground robot $i$. With both baseline gains equal to one, the implemented
+ground update is
+
+
+\begin{equation}
+p^G_{i,k+1}
+=
+p^G_{i,k}
++
+\Delta t
+\left[
+\left(1-\widehat\sigma_{a(i)}\right)
+\left(c^G_{i,k}-p^G_{i,k}\right)
++
+\widehat\sigma_{a(i)}
+\left(c^A_{a^-,k}-p^G_{i,k}\right)
+\right].
+\end{equation}
+
+
+The runner uses the paired mission timestep $\Delta t$ rather than the
+demonstration script's default timestep, clips ground positions to the
+rectangular domain, and rejects maps containing obstacles. Both classes are
+first-order point robots with omnidirectional range-limited sensing; no heading
+state is fabricated. The stored baseline diagnostic is
+
+
+\begin{equation}
+H_k
+=
+\Delta A
+\sum_j
+\phi_j
+\left\|\mathbf q_j-p^G_{\operatorname{Vor}(j),k}\right\|^2.
+\end{equation}
+
+
+This locational cost is not substituted for the common physical coverage
+metric. Because the baseline consumes oracle truth directly, it publishes no
+reconstructed density or posterior uncertainty.
+
+
 \section{Legacy compatibility path}
 
 
@@ -1358,6 +1508,8 @@ MPC prediction dynamics & \href{../src/models/models.py}{\texttt{\detokenize{src
 Voronoi partition and Lloyd centroids & \href{../src/utils/voronoi.py}{\texttt{\detokenize{src/utils/voronoi.py}}}, \href{../src/coupled_simulation.py}{\texttt{\detokenize{src/coupled_simulation.py}}} \\
 MPC objective & \href{../src/core/costFunctions.py}{\texttt{\detokenize{src/core/costFunctions.py}}}, \href{../src/coupled_simulation.py}{\texttt{\detokenize{src/coupled_simulation.py}}} \\
 Coverage error & \href{../src/core/base.py}{\texttt{\detokenize{src/core/base.py}}} \\
+Footprint-normalized evaluation coverage & \href{../evaluation/multifidelity_metrics.py}{\texttt{\detokenize{evaluation/multifidelity_metrics.py}}}, \href{../evaluation/evaluate_multifidelity_ablation.py}{\texttt{\detokenize{evaluation/evaluate_multifidelity_ablation.py}}} \\
+Egerstedt comparison baseline & \href{../evaluation/egerstedt.py}{\texttt{\detokenize{evaluation/egerstedt.py}}}, \href{../evaluation/run_egerstedt_comparison.py}{\texttt{\detokenize{evaluation/run_egerstedt_comparison.py}}} \\
 \bottomrule
 \end{longtable}
 

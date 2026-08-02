@@ -30,3 +30,14 @@ docs/latex/*.pdf
 AGENTS.md
 docs/architecture/
 prompts/
+
+# Reproducible footprint-normalized coverage milestone artifacts
+!docs/assets/coverage_metric_milestone.png
+!docs/assets/multifidelity_comparison_runner_milestone.png
+!docs/assets/egerstedt_comparison_runner_milestone.png
+!docs/assets/comparison_trajectory_milestone/
+!docs/assets/comparison_trajectory_milestone/**
+!docs/architecture/
+docs/architecture/*
+!docs/architecture/implementation_coverage_metric.md
+!docs/architecture/implementation_baseline_comparison_runner.md

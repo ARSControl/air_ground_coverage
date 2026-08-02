@@ -9,6 +9,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.patches import Wedge  # noqa: E402
 import numpy as np
 
 from src.core.multifidelity_estimator import PosteriorSnapshot
@@ -24,6 +25,10 @@ def render_final_multifidelity_state(
     snapshot: PosteriorSnapshot,
     ground_truth: np.ndarray,
     output_path: str | Path,
+    *,
+    ground_fov_degrees: float | None = None,
+    ground_sensing_range: float | None = None,
+    ground_final_states: np.ndarray | None = None,
 ) -> Path:
     """Save a four-panel summary of the final posterior and trajectories."""
     grid_x, grid_y = _structured_grid(snapshot)
@@ -69,7 +74,12 @@ def render_final_multifidelity_state(
         vmax=field_limits[1],
     )
     _plot_combined_trajectories(
-        axes[1, 0], result.aerial_trajectories, result.ground_trajectories
+        axes[1, 0],
+        result.aerial_trajectories,
+        result.ground_trajectories,
+        ground_fov_degrees=ground_fov_degrees,
+        ground_sensing_range=ground_sensing_range,
+        ground_final_states=ground_final_states,
     )
     axes[1, 0].set_title("C. All robot trajectories over final GP estimate")
     figure.colorbar(image, ax=axes[1, 0], label="estimated field value")
@@ -84,7 +94,12 @@ def render_final_multifidelity_state(
         vmax=field_limits[1],
     )
     _plot_combined_trajectories(
-        axes[1, 1], result.aerial_trajectories, result.ground_trajectories
+        axes[1, 1],
+        result.aerial_trajectories,
+        result.ground_trajectories,
+        ground_fov_degrees=ground_fov_degrees,
+        ground_sensing_range=ground_sensing_range,
+        ground_final_states=ground_final_states,
     )
     axes[1, 1].set_title("D. All robot trajectories over simulator ground truth")
     figure.colorbar(image, ax=axes[1, 1], label="ground-truth field value")
@@ -174,10 +189,34 @@ def _truth_grid(
 
 
 def _plot_combined_trajectories(
-    axis, aerial_trajectories, ground_trajectories
+    axis,
+    aerial_trajectories,
+    ground_trajectories,
+    *,
+    ground_fov_degrees: float | None = None,
+    ground_sensing_range: float | None = None,
+    ground_final_states: np.ndarray | None = None,
 ) -> None:
     _plot_team(axis, aerial_trajectories, "Aerial", "#2563eb")
-    _plot_team(axis, ground_trajectories, "Ground", "#f97316")
+    _plot_team(
+        axis,
+        ground_trajectories,
+        "Ground",
+        "#00e5ff",
+        linewidth=2.8,
+    )
+    if ground_fov_degrees is not None or ground_sensing_range is not None:
+        if ground_fov_degrees is None or ground_sensing_range is None:
+            raise ValueError(
+                "ground_fov_degrees and ground_sensing_range must be set together"
+            )
+        _plot_ground_sensing_footprints(
+            axis,
+            ground_trajectories,
+            ground_fov_degrees,
+            ground_sensing_range,
+            ground_final_states,
+        )
     if aerial_trajectories or ground_trajectories:
         axis.legend(loc="best", fontsize=8)
     else:
@@ -192,7 +231,72 @@ def _plot_combined_trajectories(
         )
 
 
-def _plot_team(axis, trajectories, label_prefix: str, color: str) -> None:
+def _plot_ground_sensing_footprints(
+    axis,
+    trajectories,
+    fov_degrees: float,
+    sensing_range: float,
+    final_states: np.ndarray | None,
+) -> None:
+    """Overlay heading-centered sensing sectors at final ground states."""
+    fov = float(fov_degrees)
+    depth = float(sensing_range)
+    if not np.isfinite(fov) or not 0.0 < fov <= 360.0:
+        raise ValueError("ground_fov_degrees must be finite and in (0, 360]")
+    if not np.isfinite(depth) or depth <= 0.0:
+        raise ValueError("ground_sensing_range must be finite and positive")
+    if not trajectories:
+        return
+    if final_states is None:
+        state_rows = []
+        for trajectory in trajectories:
+            values = np.asarray(trajectory, dtype=float)
+            if values.ndim != 2 or values.shape[1] < 3 or values.shape[0] == 0:
+                raise ValueError(
+                    "ground final states are required when trajectories omit heading"
+                )
+            state_rows.append(values[-1, :3])
+        states = np.asarray(state_rows, dtype=float)
+    else:
+        states = np.asarray(final_states, dtype=float)
+    if (
+        states.ndim != 2
+        or states.shape[0] != len(trajectories)
+        or states.shape[1] < 3
+    ):
+        raise ValueError(
+            "ground_final_states must have shape (num_ground_robots, state_dim>=3)"
+        )
+
+    half_fov = 0.5 * fov
+    for index, final_state in enumerate(states):
+        if not np.all(np.isfinite(final_state[:3])):
+            raise ValueError("ground final states must be finite")
+        heading_degrees = float(np.rad2deg(final_state[2]))
+        footprint = Wedge(
+            center=(float(final_state[0]), float(final_state[1])),
+            r=depth,
+            theta1=heading_degrees - half_fov,
+            theta2=heading_degrees + half_fov,
+            facecolor="#00e5ff",
+            edgecolor="#ffffff",
+            linewidth=1.6,
+            linestyle="--",
+            alpha=0.24,
+            zorder=2,
+            label="Ground sensing footprints" if index == 0 else None,
+        )
+        axis.add_patch(footprint)
+
+
+def _plot_team(
+    axis,
+    trajectories,
+    label_prefix: str,
+    color: str,
+    *,
+    linewidth: float = 2.0,
+) -> None:
     final_positions = []
     for index, trajectory in enumerate(trajectories):
         values = np.asarray(trajectory, dtype=float)
@@ -204,8 +308,8 @@ def _plot_team(axis, trajectories, label_prefix: str, color: str) -> None:
             values[:, 0],
             values[:, 1],
             color=color,
-            linewidth=2.0,
-            alpha=0.9,
+            linewidth=linewidth,
+            alpha=1.0,
             label=f"{label_prefix} trajectories" if index == 0 else None,
         )
         final_positions.append(values[-1, :2])
@@ -260,7 +364,13 @@ def main() -> None:
     if snapshot is None:
         raise RuntimeError("simulation produced no valid final posterior")
     path = render_final_multifidelity_state(
-        result, snapshot, simulation.hedac.goal_density, arguments.output
+        result,
+        snapshot,
+        simulation.hedac.goal_density,
+        arguments.output,
+        ground_fov_degrees=ground_params.fov_deg,
+        ground_sensing_range=ground_params.fov_depth,
+        ground_final_states=simulation.ground_team.get_states(),
     )
     print(f"saved={path}")
     print(f"posterior_version={snapshot.version}")

@@ -2,13 +2,12 @@
 
 ## Current Milestone
 
-The observer-only coupled-video recording milestone is **complete and verified
-on 2026-07-17**. A fixed-seed 12-step coupled smoke run produced and was
-visually inspected as `docs/assets/multifidelity_video_recording_milestone.gif`.
-The canonical configuration now defaults to GIF output, while optional MP4
-output remains available when `ffmpeg` is installed. The separate LaTeX/PDF
-publication workflow remains locally structurally verified and awaits its first
-GitHub Actions compilation.
+The separate comparison-trajectory plotting milestone is **complete and
+verified on 2026-08-02**. One command now reads the paired proposed-method and
+Egerstedt archives and writes one independent plot into each method's result
+folder. Both files use the same episode, hidden-truth background, density color
+scale, axes, canvas dimensions, and endpoint conventions. No production or
+baseline control behavior changed.
 
 ## Completed Work
 
@@ -1206,3 +1205,190 @@ committed: pull requests upload it as a 30-day workflow artifact, and a push to
   fixed from the first captured frame through the end of that video. This is a
   visualization-only change; the published variance array and all estimator
   behavior remain unchanged.
+
+## Footprint-normalized coverage evaluation milestone
+
+- Files changed: `evaluation/multifidelity_metrics.py`,
+  `evaluation/evaluate_multifidelity_ablation.py`,
+  `evaluation/plot_multifidelity_ablation.py`,
+  `tests/test_multifidelity_ablation_pipeline.py`,
+  `configs/multifidelity_ablation.yaml`,
+  `examples/plot_coverage_metric_milestone.py`,
+  `docs/assets/coverage_metric_milestone.png`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/architecture/implementation_coverage_metric.md`, and this status file.
+  `.gitignore` also gained narrow exceptions for the required milestone diagram
+  and PNG artifact.
+- The evaluator retains `covered_probability_mass` as the raw truth mass in
+  the actual union of ground sensing sectors. Its primary `coverage` array is
+  now that mass divided by a fixed episode oracle. The oracle's area budget is
+  `min(free_area, robot_count * 0.5 * fov_radians * range**2)`; it sorts free
+  cells by truth-density value and fractionally accepts the final cell. The
+  archive also records the oracle mass, area budget, free area, area fraction,
+  and raw final and time-averaged values.
+- The ablation plot's fourth panel now displays footprint-normalized coverage
+  effectiveness. No estimator or closed-loop behavior changed. The ablation
+  YAML was resynchronized with the current canonical 200-step/two-aerial-robot
+  values while retaining its 20 episodes and ablation isolation settings.
+- Regeneration command: `MPLCONFIGDIR=/tmp/ral_marta_mpl PYTHONPATH=.
+  .venv/bin/python examples/plot_coverage_metric_milestone.py`. The fixed
+  synthetic field produced visible mass `0.330499593435`, densest-area oracle
+  mass `0.342483594409`, and effectiveness `0.965008540060`. The PNG was
+  visually inspected: sector overlays, axes, density colorbar, bar labels, and
+  score annotation are readable and unclipped.
+- Smoke validation commands: `evaluation/run_multifidelity_ablation.py` for one
+  four-step full-method episode, followed by
+  `evaluation/evaluate_multifidelity_ablation.py` and
+  `evaluation/plot_multifidelity_ablation.py`, using `/tmp` archives. The
+  episode had area budget `3.14159265`, free area `81`, oracle mass
+  `0.21776701`, raw visible mass from `0.02886549` to `0.06157043`, and
+  normalized effectiveness from `0.13255216` to `0.28273532`.
+- Validation results: Ruff passed for all affected Python files. The focused
+  metric/pipeline suite passed `13/13`. The accumulated suite passed 186 tests
+  and retained three unrelated failures: stale expectations of 300 canonical
+  steps, the former orange ground-trajectory color, and
+  `posterior_version=` in progress text. No test related to the new metric
+  failed.
+- Numerical and behavioral regressions: the meaning of evaluated `coverage`
+  intentionally changed from a low-magnitude raw probability mass to a bounded
+  footprint-normalized effectiveness. Consumers requiring the former quantity
+  must read `covered_probability_mass`. Simulation trajectories, estimator
+  posteriors, controller targets, and runtimes are unchanged because all new
+  calculations occur in offline evaluation.
+
+## Proposed-method baseline-comparison runner milestone
+
+- Files changed: `evaluation/comparison_io.py`,
+  `evaluation/run_multifidelity_comparison.py`,
+  `tests/test_multifidelity_comparison_runner.py`,
+  `examples/plot_multifidelity_comparison_runner_milestone.py`,
+  `docs/assets/multifidelity_comparison_runner_milestone.png`,
+  `docs/architecture/implementation_baseline_comparison_runner.md`,
+  `.gitignore`, and this status file.
+- The runner instantiates the existing production `CoupledSimulation` for one
+  predeclared seed per episode. It saves the simulator HIGH, LOW, and
+  discrepancy truth rasters; normalized truth on the controller grid; map and
+  free mask; initial and full aerial/ground states; physical timestamps;
+  sensor geometry; posterior records and sample counts; and per-phase wall
+  timings. It deliberately computes no KL, reconstruction, calibration, or
+  coverage metric during simulation.
+- The archive metadata makes the pairing rule explicit: a baseline must reuse
+  the saved truth, map, and initial states rather than regenerating them from a
+  seed. This is necessary because method implementations consume random draws
+  in different orders. The current `evaluation/egerstedt.py` demonstration has
+  not yet been adapted to this archive contract.
+- Direct smoke command: `PYTHONPATH=. .venv/bin/python
+  evaluation/run_multifidelity_comparison.py --config
+  configs/multifidelity_ablation_smoke.yaml --output
+  /tmp/multifidelity_comparison_smoke.npz --episodes 1 --num-steps 4
+  --no-progress`. It produced one five-state aerial trajectory, one five-state
+  ground trajectory, two posterior records, and truth-density weighted mass
+  `0.9999999999999999`.
+- Visual regeneration command: `MPLCONFIGDIR=/tmp/ral_marta_mpl PYTHONPATH=.
+  .venv/bin/python
+  examples/plot_multifidelity_comparison_runner_milestone.py`. The resulting
+  fixed-seed figure was visually inspected after adding plot margins: both
+  robot classes, the shared truth field, labels, colorbar, and boundary states
+  are readable without clipping.
+- Validation results: Ruff passed. The new runner tests and existing ablation
+  pipeline tests passed `15/15`. The accumulated suite passed 188 tests and
+  retained three unrelated failures: stale expectations of 300 canonical
+  steps, the former orange ground-trajectory color, and
+  `posterior_version=` in progress text.
+- Mathematical documentation: no equations changed. The new file only records
+  existing simulation inputs and outputs, so `docs/mathematical_formulation.md`
+  and its LaTeX source remain current without modification.
+- Numerical and behavioral regressions: none. The smoke archive's normalized
+  truth integrated to one, and the runner does not feed archived values back
+  into the simulation. Comparison metrics remain a separate future stage.
+
+## Separate Egerstedt baseline runner milestone
+
+- Files changed: `evaluation/comparison_io.py`,
+  `evaluation/run_multifidelity_comparison.py`,
+  `evaluation/run_egerstedt_comparison.py`,
+  `tests/test_egerstedt_comparison_runner.py`,
+  `examples/plot_egerstedt_comparison_runner_milestone.py`,
+  `docs/assets/egerstedt_comparison_runner_milestone.png`,
+  `docs/architecture/implementation_baseline_comparison_runner.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`, `.gitignore`, and this status
+  file. The baseline algorithm source `evaluation/egerstedt.py` remains
+  separate and unchanged.
+- Default outputs are now
+  `output/baseline_comparison/multifidelity/raw.npz` for the proposed method
+  and `output/baseline_comparison/egerstedt/raw.npz` for the baseline. The
+  Egerstedt default input is the proposed-method archive in the first folder.
+- The paired scenario fingerprint hashes seeds, physical timestamps, query
+  grid and weights, truth raster and density, free mask, map, full initial
+  states, and aerial/ground sensing ranges. Both archives retain enough source
+  arrays to recompute the same fingerprint. Method-specific FOV is excluded:
+  the proposed ground sector is configured independently, whereas this
+  baseline faithfully uses an omnidirectional range-limited disk.
+- The runner rejects obstacle maps because the baseline implementation assumes
+  a convex obstacle-free domain. It reuses the paired timestep, positions,
+  horizon, ranges, and robot counts; executes uniform range-limited aerial
+  Lloyd motion and truth-weighted hierarchical ground Lloyd motion; and saves
+  positions, allocation errors, locational cost, and phase timings. It saves no
+  fabricated posterior, reconstruction metric, or heading state.
+- Commands: first run `python evaluation/run_multifidelity_comparison.py`, then
+  `python evaluation/run_egerstedt_comparison.py`. Both support direct
+  execution, progress display, and explicit input/output overrides.
+- Visual regeneration command: `MPLCONFIGDIR=/tmp/ral_marta_mpl PYTHONPATH=.
+  .venv/bin/python examples/plot_egerstedt_comparison_runner_milestone.py`.
+  The fixed-seed paired smoke run produced fingerprint
+  `6849ca260e9c11200963c37267a9faced3222f280c7713d3175a82f569f1729c`
+  and final baseline locational cost `10.2814150565`. The two-panel PNG was
+  visually inspected; shared density scale, initial crosses, final markers,
+  both robot-class trajectories, boundary margins, labels, and colorbar are
+  readable without clipping.
+- Validation results: Ruff, compilation, and diff checks passed. Eight focused
+  runner/publication tests passed. The accumulated suite passed 191 tests and
+  retained the same three unrelated failures: stale expectations of 300
+  canonical steps, the former orange ground-trajectory color, and
+  `posterior_version=` in progress text.
+- Numerical and behavioral regressions: none in production code. The proposed
+  runner's default output path intentionally changed to its method subfolder.
+  The baseline uses the paired mission timestep instead of the demonstration
+  function's hard-coded default and records that exact implemented choice in
+  the mathematical reference. Common comparison metric computation remains a
+  separate offline stage.
+
+## Separate comparison-trajectory plotting milestone
+
+- Files changed: `evaluation/plot_baseline_comparison.py`,
+  `tests/test_plot_baseline_comparison.py`,
+  `examples/plot_separate_comparison_trajectories_milestone.py`, the two PNGs
+  below `docs/assets/comparison_trajectory_milestone/`,
+  `docs/architecture/implementation_baseline_comparison_runner.md`,
+  `.gitignore`, and this status file.
+- Running `python evaluation/plot_baseline_comparison.py` reads the default
+  paired archives and writes
+  `output/baseline_comparison/multifidelity/trajectories_episode_000.png` and
+  `output/baseline_comparison/egerstedt/trajectories_episode_000.png`. The
+  `--episode N` and `--output-root PATH` arguments select another episode or
+  destination without combining the methods into one image.
+- Before plotting, the script recomputes both scenario fingerprints and
+  requires identical saved truth. Each independent image uses the same truth
+  normalization, domain extent, physical-unit axes, figure size, and marker
+  vocabulary. Aerial paths are dashed, ground paths are solid, initial
+  positions are crosses, and final positions use class-specific markers.
+- Final ground footprints are method-specific: the proposed plot uses saved
+  headings, FOV, and range to draw sectors; the Egerstedt plot draws its saved
+  omnidirectional disks. Footprint portions outside the environment are clipped
+  by the axes and therefore visually expose boundary loss.
+- Visual regeneration command: `MPLCONFIGDIR=/tmp/ral_marta_mpl PYTHONPATH=.
+  .venv/bin/python
+  examples/plot_separate_comparison_trajectories_milestone.py`. Both generated
+  PNGs were inspected separately. Titles, legends, axes, initial/final markers,
+  trajectories, footprints, density colorbars, boundary clipping, and margins
+  are readable; the files have identical pixel dimensions.
+- Validation results: Ruff passed. Seven focused plot/runner tests passed. The
+  accumulated suite passed 193 tests and retained the same three unrelated
+  failures: stale expectations of 300 canonical steps, the former orange
+  ground-trajectory color, and `posterior_version=` in progress text.
+- Mathematical documentation and regressions: no equations, metrics,
+  controllers, fields, sensing, or dynamics changed. This is offline plotting
+  only, so the existing mathematical references remain current.

@@ -124,9 +124,7 @@ class RBFKernel:
         right = _positions(x_right, "x_right")
         with np.errstate(over="ignore", invalid="ignore"):
             differences = left[:, None, :] - right[None, :, :]
-            squared_distances = np.einsum(
-                "ijk,ijk->ij", differences, differences
-            )
+            squared_distances = np.einsum("ijk,ijk->ij", differences, differences)
             scaled = squared_distances / (self.length_scale * self.length_scale)
             covariance = self.variance * np.exp(-0.5 * scaled)
         if not np.all(np.isfinite(covariance)):
@@ -188,10 +186,7 @@ class HyperparameterFitResult:
 
     @property
     def improved(self) -> bool:
-        return (
-            self.final_negative_log_likelihood
-            < self.initial_negative_log_likelihood
-        )
+        return self.final_negative_log_likelihood < self.initial_negative_log_likelihood
 
 
 @dataclass(frozen=True)
@@ -226,6 +221,7 @@ class MultiFidelityGaussianProcess:
         rho: float,
         low_kernel: RBFKernel,
         discrepancy_kernel: RBFKernel,
+        discrepancy_enabled: bool = True,
         jitter: float = 1.0e-8,
         max_jitter_attempts: int = 5,
         jitter_multiplier: float = 10.0,
@@ -235,8 +231,11 @@ class MultiFidelityGaussianProcess:
             raise TypeError("low_kernel must be an RBFKernel")
         if not isinstance(discrepancy_kernel, RBFKernel):
             raise TypeError("discrepancy_kernel must be an RBFKernel")
+        if not isinstance(discrepancy_enabled, bool):
+            raise TypeError("discrepancy_enabled must be a boolean")
         self.low_kernel = low_kernel
         self.discrepancy_kernel = discrepancy_kernel
+        self.discrepancy_enabled = discrepancy_enabled
 
         self.jitter = _finite_scalar(jitter, "jitter")
         if self.jitter <= 0.0:
@@ -248,9 +247,7 @@ class MultiFidelityGaussianProcess:
         if max_jitter_attempts < 1:
             raise ValueError("max_jitter_attempts must be at least 1")
         self.max_jitter_attempts = int(max_jitter_attempts)
-        self.jitter_multiplier = _finite_scalar(
-            jitter_multiplier, "jitter_multiplier"
-        )
+        self.jitter_multiplier = _finite_scalar(jitter_multiplier, "jitter_multiplier")
         if self.jitter_multiplier <= 1.0:
             raise ValueError("jitter_multiplier must be greater than 1")
 
@@ -320,12 +317,8 @@ class MultiFidelityGaussianProcess:
                 candidate_high_positions,
                 candidate_high_noise,
             )
-            candidate_cholesky, candidate_effective_jitter = self._factorize(
-                covariance
-            )
-            observations = np.concatenate(
-                (candidate_low_values, candidate_high_values)
-            )
+            candidate_cholesky, candidate_effective_jitter = self._factorize(covariance)
+            observations = np.concatenate((candidate_low_values, candidate_high_values))
             intermediate = solve_triangular(
                 candidate_cholesky, observations, lower=True, check_finite=False
             )
@@ -359,6 +352,10 @@ class MultiFidelityGaussianProcess:
         max_iterations: int = 100,
     ) -> HyperparameterFitResult:
         """Fit kernel parameters by bounded log-space marginal likelihood."""
+        if not self.discrepancy_enabled:
+            raise ValueError(
+                "hyperparameter fitting is unavailable when discrepancy is disabled"
+            )
         if not isinstance(bounds, KernelHyperparameterBounds):
             raise TypeError("bounds must be KernelHyperparameterBounds")
         for value, name in (
@@ -386,8 +383,7 @@ class MultiFidelityGaussianProcess:
             raise ValueError("hyperparameter fitting requires observations")
         observations = np.concatenate((low_y, high_y))
         log_bounds = tuple(
-            (np.log(lower), np.log(upper))
-            for lower, upper in bounds.as_tuple()
+            (np.log(lower), np.log(upper)) for lower, upper in bounds.as_tuple()
         )
         initial = np.log(
             np.clip(
@@ -403,6 +399,7 @@ class MultiFidelityGaussianProcess:
                 rho=self.rho,
                 low_kernel=RBFKernel(parameters[0], parameters[1]),
                 discrepancy_kernel=RBFKernel(parameters[2], parameters[3]),
+                discrepancy_enabled=self.discrepancy_enabled,
                 jitter=self.jitter,
                 max_jitter_attempts=self.max_jitter_attempts,
                 jitter_multiplier=self.jitter_multiplier,
@@ -472,10 +469,9 @@ class MultiFidelityGaussianProcess:
     def predict_high(self, query_positions: ArrayLike) -> HighFidelityPrediction:
         """Predict latent ``f_H`` posterior mean and marginal variance."""
         query = _positions(query_positions, "query_positions")
-        prior_variance = (
-            self.rho * self.rho * self.low_kernel.diagonal(query)
-            + self.discrepancy_kernel.diagonal(query)
-        )
+        prior_variance = self.rho * self.rho * self.low_kernel.diagonal(
+            query
+        ) + self._discrepancy_diagonal(query)
 
         if self._cholesky is None:
             return HighFidelityPrediction(
@@ -517,15 +513,10 @@ class MultiFidelityGaussianProcess:
         covariance = np.empty((n_low + n_high, n_low + n_high), dtype=float)
 
         low_low = self.low_kernel.covariance(low_positions, low_positions)
-        low_high = self.rho * self.low_kernel.covariance(
-            low_positions, high_positions
-        )
-        high_high = (
-            self.rho
-            * self.rho
-            * self.low_kernel.covariance(high_positions, high_positions)
-            + self.discrepancy_kernel.covariance(high_positions, high_positions)
-        )
+        low_high = self.rho * self.low_kernel.covariance(low_positions, high_positions)
+        high_high = self.rho * self.rho * self.low_kernel.covariance(
+            high_positions, high_positions
+        ) + self._discrepancy_covariance(high_positions, high_positions)
         if n_low:
             low_low[np.diag_indices(n_low)] += low_noise
         if n_high:
@@ -539,16 +530,28 @@ class MultiFidelityGaussianProcess:
 
     def _training_to_high_covariance(self, query: FloatArray) -> FloatArray:
         """Return ``Cov([y_L, y_H], f_H(query))``."""
-        low_to_high = self.rho * self.low_kernel.covariance(
-            self._low_positions, query
-        )
-        high_to_high = (
-            self.rho
-            * self.rho
-            * self.low_kernel.covariance(self._high_positions, query)
-            + self.discrepancy_kernel.covariance(self._high_positions, query)
-        )
+        low_to_high = self.rho * self.low_kernel.covariance(self._low_positions, query)
+        high_to_high = self.rho * self.rho * self.low_kernel.covariance(
+            self._high_positions, query
+        ) + self._discrepancy_covariance(self._high_positions, query)
         return np.vstack((low_to_high, high_to_high))
+
+    def _discrepancy_covariance(
+        self, x_left: ArrayLike, x_right: ArrayLike
+    ) -> FloatArray:
+        """Return configured discrepancy covariance or the exact zero kernel."""
+        left = _positions(x_left, "x_left")
+        right = _positions(x_right, "x_right")
+        if not self.discrepancy_enabled:
+            return np.zeros((left.shape[0], right.shape[0]), dtype=float)
+        return self.discrepancy_kernel.covariance(left, right)
+
+    def _discrepancy_diagonal(self, x: ArrayLike) -> FloatArray:
+        """Return configured discrepancy prior variance or exact zeros."""
+        positions = _positions(x, "x")
+        if not self.discrepancy_enabled:
+            return np.zeros(positions.shape[0], dtype=float)
+        return self.discrepancy_kernel.diagonal(positions)
 
     def _factorize(self, covariance: FloatArray) -> tuple[FloatArray, float]:
         """Cholesky-factor covariance using deterministic jitter escalation."""

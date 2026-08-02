@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from pathlib import Path
+from time import perf_counter
 from typing import Protocol
 
 import casadi as ca
@@ -60,6 +61,18 @@ class GroundController(Protocol):
 
 
 @dataclass(frozen=True)
+class CoupledStepTiming:
+    """Wall-clock durations for the deterministic phases of one outer step."""
+
+    low_collection: float
+    aerial_control: float
+    high_collection: float
+    estimator_update: float
+    ground_control: float
+    total: float
+
+
+@dataclass(frozen=True)
 class CoupledStepResult:
     step_num: int
     simulation_time: float
@@ -68,6 +81,7 @@ class CoupledStepResult:
     posterior_version: int
     aerial_density_source: str
     ground_density_source: str
+    timing: CoupledStepTiming
 
 
 @dataclass(frozen=True)
@@ -121,20 +135,23 @@ class CoupledSimulation:
             raise ValueError("step_num must be a nonnegative integer")
         simulation_time = step_num * self.dt
         reports: list[CoordinatorEventReport] = []
+        total_start = perf_counter()
+        low_collection_duration = 0.0
+        high_collection_duration = 0.0
+        estimator_update_duration = 0.0
 
         if self.coordinator is not None:
+            phase_start = perf_counter()
             reports.append(
-                self.coordinator.collect_low_if_due(
-                    simulation_time, self.aerial_team
-                )
+                self.coordinator.collect_low_if_due(simulation_time, self.aerial_team)
             )
+            low_collection_duration = perf_counter() - phase_start
 
+        phase_start = perf_counter()
         if self.coordinator is None:
             aerial_target = None
             aerial_density_source = "legacy_aerial_gp"
-            ergodic_metric = float(
-                self.hedac.step(self.aerial_team, step_num=step_num)
-            )
+            ergodic_metric = float(self.hedac.step(self.aerial_team, step_num=step_num))
         else:
             map_height, map_width = self.hedac.map.shape
             aerial_target = self.coordinator.aerial_target(
@@ -146,7 +163,7 @@ class CoupledSimulation:
             aerial_density_source = (
                 "multifidelity_static_initial"
                 if aerial_target is None
-                else "multifidelity_high_posterior"
+                else f"multifidelity_{self.coordinator.aerial_target_source}"
             )
             ergodic_metric = float(
                 self.hedac.step(
@@ -156,15 +173,19 @@ class CoupledSimulation:
                     update_legacy_gp=False,
                 )
             )
+        aerial_control_duration = perf_counter() - phase_start
 
         if self.coordinator is not None:
+            phase_start = perf_counter()
             reports.append(
-                self.coordinator.collect_high_if_due(
-                    simulation_time, self.ground_team
-                )
+                self.coordinator.collect_high_if_due(simulation_time, self.ground_team)
             )
+            high_collection_duration = perf_counter() - phase_start
+            phase_start = perf_counter()
             reports.append(self.coordinator.update_if_due(simulation_time))
+            estimator_update_duration = perf_counter() - phase_start
 
+        phase_start = perf_counter()
         if self.coordinator is None:
             self.ground_controller.step(step_num, self.hedac)
         else:
@@ -177,10 +198,12 @@ class CoupledSimulation:
                 self.hedac,
                 external_density=ground_density,
             )
+        ground_control_duration = perf_counter() - phase_start
         self._estimator_reports.extend(reports)
         posterior_version = (
             0 if self.coordinator is None else self.coordinator.estimator.version
         )
+        total_duration = perf_counter() - total_start
         result = CoupledStepResult(
             step_num=step_num,
             simulation_time=simulation_time,
@@ -189,6 +212,14 @@ class CoupledSimulation:
             posterior_version=posterior_version,
             aerial_density_source=aerial_density_source,
             ground_density_source=self.ground_controller.density_source,
+            timing=CoupledStepTiming(
+                low_collection=low_collection_duration,
+                aerial_control=aerial_control_duration,
+                high_collection=high_collection_duration,
+                estimator_update=estimator_update_duration,
+                ground_control=ground_control_duration,
+                total=total_duration,
+            ),
         )
         self._step_results.append(result)
         return result
@@ -257,9 +288,7 @@ def build_coupled_simulation(
             map_array.shape,
             max(2, int(ground_params.local_grid_points)),
         )
-        ground_controller = _NoOpGroundController(
-            query_points, integration_weights
-        )
+        ground_controller = _NoOpGroundController(query_points, integration_weights)
     elif controller_type == "mpc":
         legacy_ground = _LegacyGroundMPC(
             ground_params, map_array, ground_team, goal_density
@@ -438,9 +467,7 @@ class _LegacyGroundMPC:
         else:
             candidate_density = external_density
         states = self.team.get_states()
-        masks = compute_voronoi_partitioning(
-            self.query_points, states[:, :2], 50.0
-        )
+        masks = compute_voronoi_partitioning(self.query_points, states[:, :2], 50.0)
         if external_density is None:
             weight_vectors = tuple(
                 candidate_density * masks[index]
@@ -455,9 +482,7 @@ class _LegacyGroundMPC:
         self.last_density = np.array(candidate_density, dtype=float, copy=True)
         self._density_source = density_source
         lower_control, upper_control, lower_constraint, upper_constraint = self._bounds
-        for index, (agent, weights) in enumerate(
-            zip(self.team.agents, weight_vectors)
-        ):
+        for index, (agent, weights) in enumerate(zip(self.team.agents, weight_vectors)):
             state = np.hstack([agent.position, agent.theta])
             parameters = np.concatenate([state, weights])
             solution = self._solver(
@@ -560,9 +585,7 @@ class _GroundLloydController:
         )
 
         controls = np.zeros((len(self.team), 2), dtype=float)
-        for index, (agent, centroid) in enumerate(
-            zip(self.team.agents, centroids)
-        ):
+        for index, (agent, centroid) in enumerate(zip(self.team.agents, centroids)):
             displacement = centroid - agent.position
             distance = float(np.linalg.norm(displacement))
             if distance <= self.centroid_tolerance:
@@ -593,9 +616,7 @@ class _GroundLloydController:
         self.last_masses = masses
         self.last_controls = controls
         self._density_source = density_source
-        for agent, (velocity, angular_velocity) in zip(
-            self.team.agents, controls
-        ):
+        for agent, (velocity, angular_velocity) in zip(self.team.agents, controls):
             agent.step(velocity, angular_velocity)
 
 
@@ -636,9 +657,9 @@ def compute_weighted_voronoi_centroids(
         if mass <= np.finfo(float).eps:
             centroids[index] = fallback[index]
         else:
-            centroids[index] = np.sum(
-                points * mass_weights[:, np.newaxis], axis=0
-            ) / mass
+            centroids[index] = (
+                np.sum(points * mass_weights[:, np.newaxis], axis=0) / mass
+            )
     return _readonly(centroids), _readonly(masses)
 
 
@@ -650,17 +671,13 @@ def _legacy_ground_density(
     hedac: HEDACAlgorithm,
     step_num: int,
 ) -> np.ndarray:
-    aerial_mean, aerial_std = hedac.gpr_model.predict(
-        query_points, return_std=True
-    )
+    aerial_mean, aerial_std = hedac.gpr_model.predict(query_points, return_std=True)
     aerial_std = _unit_max(aerial_std)
     observations = gp.collect_observations(team, high_field)
     gp.update_gp(observations, step_num)
     ground_mean, ground_std = gp.predict(query_points, return_std=True)
     ground_std = _unit_max(ground_std)
-    denominator = 1.0 / (ground_std + 1.0e-10) + 1.0 / (
-        aerial_std + 1.0e-10
-    )
+    denominator = 1.0 / (ground_std + 1.0e-10) + 1.0 / (aerial_std + 1.0e-10)
     aerial_weight = (1.0 / (aerial_std + 1.0e-10)) / denominator
     ground_weight = (1.0 / (ground_std + 1.0e-10)) / denominator
     return aerial_weight * aerial_mean + ground_weight * ground_mean
@@ -674,9 +691,7 @@ def _build_map_loader(params: HEDACParams) -> MapLoader:
     return MapLoader(size=size, resolution=params.resolution)
 
 
-def _build_goal_density(
-    params: HEDACParams, map_loader: MapLoader
-) -> np.ndarray:
+def _build_goal_density(params: HEDACParams, map_loader: MapLoader) -> np.ndarray:
     map_array = map_loader.load()
     height, width = map_array.shape
     number_of_peaks = int(params.get("goal_density.num_peaks", 3))
@@ -781,7 +796,9 @@ def _structured_query_grid(
 
 
 def _trajectories(team: AgentTeam) -> tuple[FloatArray, ...]:
-    return tuple(_readonly(np.asarray(history, dtype=float)) for history in team.get_histories())
+    return tuple(
+        _readonly(np.asarray(history, dtype=float)) for history in team.get_histories()
+    )
 
 
 def _readonly(values: np.ndarray) -> FloatArray:

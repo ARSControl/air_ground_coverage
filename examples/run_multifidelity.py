@@ -110,6 +110,7 @@ def save_final_plot_if_requested(
     result: Any,
     *,
     plots_disabled: bool,
+    ground_params: HEDACParams | None = None,
     emit: Callable[[str], None] = print,
 ) -> Path | None:
     """Render the final state when enabled by the visualization configuration."""
@@ -133,6 +134,17 @@ def save_final_plot_if_requested(
         snapshot,
         simulation.hedac.goal_density,
         Path(configured_path),
+        ground_fov_degrees=(
+            None if ground_params is None else ground_params.fov_deg
+        ),
+        ground_sensing_range=(
+            None if ground_params is None else ground_params.fov_depth
+        ),
+        ground_final_states=(
+            None
+            if ground_params is None
+            else simulation.ground_team.get_states()
+        ),
     )
     emit(f"final_plot={output_path}")
     return output_path
@@ -225,6 +237,7 @@ def main() -> None:
         simulation,
         result,
         plots_disabled=arguments.no_plot,
+        ground_params=ground_params,
         emit=lambda message: print(message, flush=True),
     )
 

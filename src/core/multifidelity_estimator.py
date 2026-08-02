@@ -113,6 +113,7 @@ class EstimatorSettings:
     hyperparameter_optimization: HyperparameterOptimizationSettings = field(
         default_factory=HyperparameterOptimizationSettings
     )
+    publish_low_only_projection: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.gp, MultiFidelityGaussianProcess):
@@ -125,9 +126,10 @@ class EstimatorSettings:
             self.hyperparameter_optimization, HyperparameterOptimizationSettings
         ):
             raise TypeError(
-                "hyperparameter_optimization must be "
-                "HyperparameterOptimizationSettings"
+                "hyperparameter_optimization must be HyperparameterOptimizationSettings"
             )
+        if not isinstance(self.publish_low_only_projection, bool):
+            raise TypeError("publish_low_only_projection must be a boolean")
         query_points = _readonly_float_array(self.query_points, "query_points", ndim=2)
         if query_points.shape[1:] != (2,):
             raise ValueError("query_points must have shape (N, 2)")
@@ -139,9 +141,7 @@ class EstimatorSettings:
         )
         if integration_weights.shape != (query_points.shape[0],):
             raise ValueError("integration_weights must match query-point count")
-        if np.any(integration_weights < 0.0) or not np.any(
-            integration_weights > 0.0
-        ):
+        if np.any(integration_weights < 0.0) or not np.any(integration_weights > 0.0):
             raise ValueError(
                 "integration_weights must be nonnegative with positive mass"
             )
@@ -149,9 +149,7 @@ class EstimatorSettings:
             mask = None
         else:
             raw_mask = np.asarray(self.mask)
-            if raw_mask.dtype != np.bool_ or raw_mask.shape != (
-                query_points.shape[0],
-            ):
+            if raw_mask.dtype != np.bool_ or raw_mask.shape != (query_points.shape[0],):
                 raise ValueError("mask must be boolean and match query-point count")
             mask = np.array(raw_mask, dtype=bool, copy=True)
             mask.setflags(write=False)
@@ -203,6 +201,10 @@ class PosteriorSnapshot:
     low_kernel_variance: float
     discrepancy_kernel_length_scale: float
     discrepancy_kernel_variance: float
+    discrepancy_enabled: bool = True
+    low_only_high_mean: FloatArray | None = None
+    low_only_high_variance: FloatArray | None = None
+    low_only_projection_duration: float = 0.0
 
     def __post_init__(self) -> None:
         timestamp = _finite_float(self.timestamp, "timestamp")
@@ -215,9 +217,7 @@ class PosteriorSnapshot:
             raise ValueError("query_points must have shape (N, 2)")
         query_shape = _query_shape(self.query_shape, query_points.shape[0])
         mean = _readonly_float_array(self.high_mean, "high_mean", ndim=1)
-        variance = _readonly_float_array(
-            self.high_variance, "high_variance", ndim=1
-        )
+        variance = _readonly_float_array(self.high_variance, "high_variance", ndim=1)
         density = _readonly_float_array(self.density, "density", ndim=1)
         weights = _readonly_float_array(
             self.integration_weights, "integration_weights", ndim=1
@@ -254,13 +254,23 @@ class PosteriorSnapshot:
         )
         if not isinstance(self.hyperparameter_fit_performed, bool):
             raise TypeError("hyperparameter_fit_performed must be a boolean")
-        if min(
-            effective_jitter,
-            fit_duration,
-            prediction_duration,
-            optimization_duration,
-        ) < 0.0:
+        if (
+            min(
+                effective_jitter,
+                fit_duration,
+                prediction_duration,
+                optimization_duration,
+            )
+            < 0.0
+        ):
             raise ValueError("jitter and durations must be nonnegative")
+        low_only_duration = _finite_float(
+            self.low_only_projection_duration, "low_only_projection_duration"
+        )
+        if low_only_duration < 0.0:
+            raise ValueError("low_only_projection_duration must be nonnegative")
+        if not isinstance(self.discrepancy_enabled, bool):
+            raise TypeError("discrepancy_enabled must be a boolean")
         hyperparameters = tuple(
             _finite_float(getattr(self, name), name)
             for name in (
@@ -283,9 +293,30 @@ class PosteriorSnapshot:
         object.__setattr__(self, "effective_jitter", effective_jitter)
         object.__setattr__(self, "fit_duration", fit_duration)
         object.__setattr__(self, "prediction_duration", prediction_duration)
-        object.__setattr__(
-            self, "hyperparameter_fit_duration", optimization_duration
-        )
+        object.__setattr__(self, "hyperparameter_fit_duration", optimization_duration)
+        object.__setattr__(self, "low_only_projection_duration", low_only_duration)
+        low_only_mean = self.low_only_high_mean
+        low_only_variance = self.low_only_high_variance
+        if (low_only_mean is None) != (low_only_variance is None):
+            raise ValueError(
+                "low_only_high_mean and low_only_high_variance must both be set or None"
+            )
+        if low_only_mean is not None:
+            validated_low_mean = _readonly_float_array(
+                low_only_mean, "low_only_high_mean", ndim=1
+            )
+            validated_low_variance = _readonly_float_array(
+                low_only_variance, "low_only_high_variance", ndim=1
+            )
+            if (
+                validated_low_mean.shape != expected_shape
+                or validated_low_variance.shape != expected_shape
+            ):
+                raise ValueError("low-only posterior vectors must match query points")
+            if np.any(validated_low_variance < 0.0):
+                raise ValueError("low_only_high_variance must be nonnegative")
+            object.__setattr__(self, "low_only_high_mean", validated_low_mean)
+            object.__setattr__(self, "low_only_high_variance", validated_low_variance)
 
 
 @dataclass(frozen=True)
@@ -436,6 +467,35 @@ class CentralAsynchronousEstimator:
                 self.settings.normalization_tolerance,
             )
 
+            low_only_mean = None
+            low_only_variance = None
+            low_only_projection_duration = 0.0
+            if self.settings.publish_low_only_projection:
+                low_only_start = perf_counter()
+                low_only_gp = type(candidate_gp)(
+                    rho=candidate_gp.rho,
+                    low_kernel=candidate_gp.low_kernel,
+                    discrepancy_kernel=candidate_gp.discrepancy_kernel,
+                    discrepancy_enabled=candidate_gp.discrepancy_enabled,
+                    jitter=candidate_gp.jitter,
+                    max_jitter_attempts=candidate_gp.max_jitter_attempts,
+                    jitter_multiplier=candidate_gp.jitter_multiplier,
+                )
+                low_only_gp.fit(
+                    low_positions,
+                    low_values,
+                    low_noise,
+                    np.empty((0, 2), dtype=float),
+                    np.empty(0, dtype=float),
+                    np.empty(0, dtype=float),
+                )
+                low_only_prediction = low_only_gp.predict_high(
+                    self.settings.query_points
+                )
+                low_only_mean = low_only_prediction.mean
+                low_only_variance = low_only_prediction.variance
+                low_only_projection_duration = perf_counter() - low_only_start
+
             next_version = self._version + 1
             snapshot = PosteriorSnapshot(
                 timestamp=timestamp,
@@ -460,9 +520,11 @@ class CentralAsynchronousEstimator:
                 discrepancy_kernel_length_scale=(
                     candidate_gp.discrepancy_kernel.length_scale
                 ),
-                discrepancy_kernel_variance=(
-                    candidate_gp.discrepancy_kernel.variance
-                ),
+                discrepancy_kernel_variance=(candidate_gp.discrepancy_kernel.variance),
+                discrepancy_enabled=candidate_gp.discrepancy_enabled,
+                low_only_high_mean=low_only_mean,
+                low_only_high_variance=low_only_variance,
+                low_only_projection_duration=low_only_projection_duration,
             )
 
             self._low_buffer.commit(low_candidate)
@@ -496,6 +558,7 @@ class CentralAsynchronousEstimator:
             rho=template.rho,
             low_kernel=template.low_kernel,
             discrepancy_kernel=template.discrepancy_kernel,
+            discrepancy_enabled=template.discrepancy_enabled,
             jitter=template.jitter,
             max_jitter_attempts=template.max_jitter_attempts,
             jitter_multiplier=template.jitter_multiplier,

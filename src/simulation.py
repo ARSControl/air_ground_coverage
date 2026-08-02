@@ -13,6 +13,7 @@ from numpy.typing import ArrayLike
 from .core.density import (
     build_aerial_target,
     normalize_nonnegative_density,
+    positive_part,
     resample_structured_grid,
 )
 from .core.multifidelity_estimator import (
@@ -151,6 +152,7 @@ class MultifidelitySimulationCoordinator:
         lambda_uncertainty: float,
         normalization_tolerance: float,
         observation_take_threshold: float | None = None,
+        aerial_target_source: str = "high_posterior",
     ) -> None:
         if not isinstance(estimator, CentralAsynchronousEstimator):
             raise TypeError("estimator must be a CentralAsynchronousEstimator")
@@ -165,9 +167,7 @@ class MultifidelitySimulationCoordinator:
         self.low_event = low_event
         self.high_event = high_event
         self.update_event = update_event
-        self.lambda_interest = _nonnegative_float(
-            lambda_interest, "lambda_interest"
-        )
+        self.lambda_interest = _nonnegative_float(lambda_interest, "lambda_interest")
         self.lambda_uncertainty = _nonnegative_float(
             lambda_uncertainty, "lambda_uncertainty"
         )
@@ -179,8 +179,15 @@ class MultifidelitySimulationCoordinator:
         self.observation_take_threshold = (
             None
             if observation_take_threshold is None
-            else _unit_interval(observation_take_threshold, "observation_take_threshold")
+            else _unit_interval(
+                observation_take_threshold, "observation_take_threshold"
+            )
         )
+        if aerial_target_source not in {"high_posterior", "low_only_projection"}:
+            raise ValueError(
+                "aerial_target_source must be 'high_posterior' or 'low_only_projection'"
+            )
+        self.aerial_target_source = aerial_target_source
         self._cached_aerial_target: np.ndarray | None = None
         self._cached_aerial_target_version = 0
         self._cached_target_x: np.ndarray | None = None
@@ -229,9 +236,7 @@ class MultifidelitySimulationCoordinator:
             )
         controller_mask = None
         if mask is not None:
-            controller_mask = _controller_array(
-                mask, "mask", controller_shape, bool
-            )
+            controller_mask = _controller_array(mask, "mask", controller_shape, bool)
             if not np.any(controller_mask & (weights > 0.0)):
                 raise ValueError("mask must include positive integration weight")
 
@@ -244,9 +249,25 @@ class MultifidelitySimulationCoordinator:
         ):
             return self._cached_aerial_target
 
+        source_density = snapshot.density
+        source_variance = snapshot.high_variance
+        if self.aerial_target_source == "low_only_projection":
+            if (
+                snapshot.low_only_high_mean is None
+                or snapshot.low_only_high_variance is None
+            ):
+                raise RuntimeError("low-only aerial target was not published")
+            positive_mean = positive_part(snapshot.low_only_high_mean)
+            mass = float(
+                np.sum(positive_mean * snapshot.integration_weights, dtype=float)
+            )
+            source_density = (
+                positive_mean / mass if mass > 0.0 else np.zeros_like(positive_mean)
+            )
+            source_variance = snapshot.low_only_high_variance
         source_target = build_aerial_target(
-            snapshot.density,
-            snapshot.high_variance,
+            source_density,
+            source_variance,
             self.lambda_interest,
             self.lambda_uncertainty,
             snapshot.integration_weights,
@@ -322,9 +343,7 @@ class MultifidelitySimulationCoordinator:
                 else np.ones(points.shape[0], dtype=float)
             )
         else:
-            weights = _ground_integration_weights(
-                integration_weights, points.shape[0]
-            )
+            weights = _ground_integration_weights(integration_weights, points.shape[0])
         if (
             self._cached_ground_density is not None
             and snapshot.version == self._cached_ground_density_version
@@ -334,9 +353,7 @@ class MultifidelitySimulationCoordinator:
             return self._cached_ground_density
 
         exact_snapshot_grid = np.array_equal(points, snapshot.query_points)
-        exact_snapshot_weights = np.array_equal(
-            weights, snapshot.integration_weights
-        )
+        exact_snapshot_weights = np.array_equal(weights, snapshot.integration_weights)
         if exact_snapshot_grid:
             projected = snapshot.density
         else:
@@ -348,7 +365,7 @@ class MultifidelitySimulationCoordinator:
                 points,
             )
         if exact_snapshot_grid and exact_snapshot_weights:
-            density = np.array(snapshot.density, dtype=float, copy=True)
+            density = snapshot.density
         else:
             density = normalize_nonnegative_density(
                 projected,
@@ -509,14 +526,32 @@ def build_multifidelity_coordinator(
                 _get(params, "multifidelity.discrepancy_kernel.variance", 0.25)
             ),
         ),
+        discrepancy_enabled=_get(params, "multifidelity.discrepancy_enabled", True),
         jitter=float(_get(params, "multifidelity.jitter", 1.0e-8)),
-        max_jitter_attempts=int(
-            _get(params, "multifidelity.max_jitter_attempts", 5)
-        ),
-        jitter_multiplier=float(
-            _get(params, "multifidelity.jitter_multiplier", 10.0)
-        ),
+        max_jitter_attempts=int(_get(params, "multifidelity.max_jitter_attempts", 5)),
+        jitter_multiplier=float(_get(params, "multifidelity.jitter_multiplier", 10.0)),
     )
+    aerial_target_source = str(
+        _get(
+            params,
+            "multifidelity.aerial_target.source",
+            "high_posterior",
+        )
+    )
+    optimization_enabled = _get(
+        params,
+        "multifidelity.hyperparameter_optimization.enabled",
+        False,
+    )
+    if not gp.discrepancy_enabled and optimization_enabled:
+        raise ValueError(
+            "hyperparameter optimization must be disabled when discrepancy is disabled"
+        )
+    if aerial_target_source == "low_only_projection" and optimization_enabled:
+        raise ValueError(
+            "hyperparameter optimization must be disabled for an isolated "
+            "low-only aerial target"
+        )
     settings = EstimatorSettings(
         gp=gp,
         low_retention=RetentionConfig(
@@ -543,11 +578,7 @@ def build_multifidelity_coordinator(
             _get(params, "multifidelity.density.normalization_tolerance", 1.0e-8)
         ),
         hyperparameter_optimization=HyperparameterOptimizationSettings(
-            enabled=_get(
-                params,
-                "multifidelity.hyperparameter_optimization.enabled",
-                False,
-            ),
+            enabled=optimization_enabled,
             fit_interval_updates=int(
                 _get(
                     params,
@@ -599,6 +630,7 @@ def build_multifidelity_coordinator(
                 ),
             ),
         ),
+        publish_low_only_projection=(aerial_target_source == "low_only_projection"),
     )
     if seed is None:
         resolved_seed = int(_get(params, "simulation.random_seed", 42))
@@ -607,17 +639,15 @@ def build_multifidelity_coordinator(
     else:
         resolved_seed = seed
     offset = int(_get(params, "multifidelity.sensor.random_seed_offset", 10000))
-    low_sequence, high_sequence = np.random.SeedSequence(
-        [resolved_seed, offset]
-    ).spawn(2)
+    low_sequence, high_sequence = np.random.SeedSequence([resolved_seed, offset]).spawn(
+        2
+    )
     low_sensor = SimulatedScalarFieldSensor(
         Fidelity.LOW,
         sample_count=int(_get(params, "gpr.obs_per_step", 10)),
         sample_range=float(_get(params, "sensor.fov_depth", 5.0)),
         fov_degrees=float(_get(params, "sensor.fov_degrees", 360.0)),
-        noise_variance=float(
-            _get(params, "multifidelity.low_noise_variance", 0.04)
-        ),
+        noise_variance=float(_get(params, "multifidelity.low_noise_variance", 0.04)),
         rng=np.random.default_rng(low_sequence),
     )
     high_sensor = SimulatedScalarFieldSensor(
@@ -625,9 +655,7 @@ def build_multifidelity_coordinator(
         sample_count=int(_get(ground_params, "gpr.obs_per_step", 10)),
         sample_range=float(_get(ground_params, "sensor.fov_depth", 5.0)),
         fov_degrees=float(_get(ground_params, "sensor.fov_degrees", 90.0)),
-        noise_variance=float(
-            _get(params, "multifidelity.high_noise_variance", 1.0e-4)
-        ),
+        noise_variance=float(_get(params, "multifidelity.high_noise_variance", 1.0e-4)),
         rng=np.random.default_rng(high_sequence),
     )
     return MultifidelitySimulationCoordinator(
@@ -656,6 +684,7 @@ def build_multifidelity_coordinator(
         observation_take_threshold=_get(
             params, "multifidelity.retention.take_threshold", None
         ),
+        aerial_target_source=aerial_target_source,
     )
 
 
@@ -697,9 +726,7 @@ def build_ground_weight_vectors(
     except (TypeError, ValueError) as exc:
         raise ValueError("voronoi_masks must be a numeric array") from exc
     if masks.ndim != 2 or masks.shape[1:] != (density_array.size,):
-        raise ValueError(
-            "voronoi_masks must have shape (num_robots, density_size)"
-        )
+        raise ValueError("voronoi_masks must have shape (num_robots, density_size)")
     if not np.all(np.isfinite(masks)):
         raise ValueError("voronoi_masks must contain only finite values")
     if np.any(masks < 0.0):
@@ -732,9 +759,7 @@ def _ground_integration_weights(values: ArrayLike, count: int) -> np.ndarray:
     if not np.all(np.isfinite(weights)):
         raise ValueError("integration_weights must contain only finite values")
     if np.any(weights < 0.0) or not np.any(weights > 0.0):
-        raise ValueError(
-            "integration_weights must be nonnegative with positive mass"
-        )
+        raise ValueError("integration_weights must be nonnegative with positive mass")
     return np.array(weights, dtype=float, copy=True)
 
 
