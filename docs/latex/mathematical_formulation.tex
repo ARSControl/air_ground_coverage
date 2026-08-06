@@ -71,6 +71,68 @@ Unless stated otherwise, the current multi-fidelity path uses one central poster
 \end{itemize}
 
 
+\section{Circular ground-obstacle map}
+
+
+The coupled simulation maintains separate aerial and ground occupancy rasters. Let $M^A_{yx}\in\{0,1\}$ be the loaded aerial/HEDAC map. Robot positions and controller grids use raster-index coordinates independently of the HEDAC heat equation's physical cell-size parameter, so the production obstacle cell-centre coordinate is
+
+
+\begin{equation}
+\mathbf q_{yx}=
+\begin{bmatrix}x&y\end{bmatrix}^{\!\top}.
+\end{equation}
+
+
+For episode seed $s$, circular-obstacle generation uses the independent deterministic seed $s_o=s+30000$. Given count $K_o$ and common radius $R_o$, candidate centres are sampled uniformly inside the map boundary inset by $R_o$ and accepted sequentially only if
+
+
+\begin{equation}
+\lVert\mathbf c_k-\mathbf c_l\rVert_2>2R_o
+\quad\text{for every previously accepted }l.
+\end{equation}
+
+
+The exact generated occupancy and ground-map union are
+
+
+\begin{equation}
+O_{yx}
+=
+\mathbf 1\!\left[
+\min_{k=1,\ldots,K_o}
+\lVert\mathbf q_{yx}-\mathbf c_k\rVert_2
+\le R_o
+\right],
+\qquad
+M^G_{yx}=\max(M^A_{yx},O_{yx}).
+\end{equation}
+
+
+An infeasible request is rejected instead of silently reducing $K_o$. By
+default, initial positions retain the historical uniform-free-cell sampling.
+The composition experiment instead deploys both classes in the lower-left
+corner. For class $r\in\{A,G\}$, map width $W$, height $H$, and $\gamma=0.2$,
+the candidate set is
+
+
+\begin{equation}
+\mathcal C^r
+=
+\{(x,y):M^r_{yx}=0,\ 0\le x<\gamma W,\ 0\le y<\gamma H\}.
+\end{equation}
+
+
+Independent episode-derived seeds $s_A=s+40000$ and $s_G=s+50000$ generate
+complete aerial and ground candidate permutations. Class $r$ receives the
+first $N_r$ cells without replacement, followed by headings drawn from
+$\mathcal U[0,2\pi)$. Consequently, the first class-specific initial states
+are nested across compositions sharing an episode seed. An insufficient
+corner candidate set is rejected rather than expanded silently. The HIGH truth
+is zeroed where $M^G=1$, and nearest-cell samples of $M^G$ define the estimator
+and evaluation query mask. Generated circles do not alter $M^A$: aerial
+vehicles may overfly them.
+
+
 \section{Simulator ground truth}
 
 
@@ -474,16 +536,30 @@ The shared posterior interest field is the positive part of the HIGH posterior m
 \end{equation}
 
 
-For a free-space mask $M_j\in\{0,1\}$ and quadrature weights $w_j$, the published density is
+For a free-space mask $M_j\in\{0,1\}$ and quadrature weights $w_j$, define
+$Z=\sum_k M_k\mu_H^+(\mathbf q_k)w_k$ and the startup-safe interest values
+
+
+\begin{equation}
+v_j
+=
+\begin{cases}
+\mu_H^+(\mathbf q_j), & Z>0,\\
+1, & Z=0.
+\end{cases}
+\end{equation}
+
+
+The published density is
 
 
 \begin{equation}
 \phi_j \\
 = \\
 \frac{ \\
-M_j\mu_H^+(\mathbf q_j) \\
+M_jv_j \\
 }{ \\
-\sum_k M_k\mu_H^+(\mathbf q_k)w_k \\
+\sum_k M_kv_kw_k \\
 }
 \end{equation}
 
@@ -496,7 +572,13 @@ Therefore
 \end{equation}
 
 
-The clipping preserves all positive posterior contrast. It does not exponentiate the field, shift negative values upward, or retain the removed softplus transformation. If every posterior mean value is nonpositive, normalization has zero mass and the estimator transaction preserves the last valid snapshot.
+The clipping preserves all positive posterior contrast. It does not
+exponentiate the field, shift negative values upward, or retain the removed
+softplus transformation. If every posterior mean value is nonpositive, the
+estimator publishes a uniform free-space density while retaining the raw mean
+and variance in the snapshot. This permits a valid first posterior when robots
+begin in a low-signal corner. Other prediction or normalization failures still
+preserve the latest valid snapshot transactionally.
 
 
 \subsection{Aerial interest-plus-uncertainty target}
@@ -860,6 +942,24 @@ The real ground agent clips $(v_i,\omega_i)$ to its configured limits, updates h
 \end{equation}
 
 
+When the ground map contains obstacles, the coupled controller predicts this heading-first segment before committing translation. The segment is sampled with spacing no greater than $0.25$ map units. With $\mathcal S_i^n$ denoting those samples, the executed velocity is
+
+
+\begin{equation}
+v_{i,\mathrm{exec}}^n
+=
+\begin{cases}
+v_i^n,
+& \mathcal S_i^n\text{ lies inside the raster and }M^G(\mathbf q)=0
+\text{ for all }\mathbf q\in\mathcal S_i^n,\\
+0,&\text{otherwise}.
+\end{cases}
+\end{equation}
+
+
+The clipped angular command is applied in both cases, allowing a blocked robot to turn away. When $M^G$ contains no occupied cell the guard is bypassed exactly, preserving the previous obstacle-free state update. This guard is used by Lloyd control and by the compatibility MPC path when its agent is a unicycle.
+
+
 \begin{equation}
 \mathbf p_i^{n+1} \\
 = \\
@@ -981,15 +1081,55 @@ If $m_i$ is numerically zero, the current robot position is used as the centroid
 \subsection{Centroid tracking}
 
 
-Define
+Define the raw centroid displacement
 
 
 \begin{equation}
-\mathbf e_i=\mathbf c_i-\mathbf p_i, \\
-\qquad \\
-r_i=\lVert\mathbf e_i\rVert_2, \\
-\qquad \\
-\theta_i^\star=\mathrm{atan2}(e_{i,y},e_{i,x})
+\mathbf e_i^c=\mathbf c_i-\mathbf p_i.
+\end{equation}
+
+
+For obstacle maps, the Lloyd path first augments this displacement. Let $\mathcal O_i$ contain occupied cell centres within
+
+
+\begin{equation}
+R_I=\max(2,2.5R_o)
+\end{equation}
+
+
+of robot $i$, and let $d_{il}=\lVert\mathbf p_i-\mathbf o_l\rVert_2$. The bounded repulsion is
+
+
+\begin{equation}
+\mathbf r_i
+=
+\operatorname{clip}_{\lVert\cdot\rVert\le1}
+\left[
+\sum_{l\in\mathcal O_i}
+\frac{R_I-d_{il}}{R_I}
+\frac{\mathbf p_i-\mathbf o_l}{d_{il}}
+\right].
+\end{equation}
+
+
+The displacement used by the heading and speed law is then
+
+
+\begin{equation}
+\widetilde{\mathbf e}_i
+=
+\mathbf c_i-\mathbf p_i
++w_o\max(\lVert\mathbf c_i-\mathbf p_i\rVert_2,1)\mathbf r_i,
+\end{equation}
+
+
+where $w_o$ is the configured ground wall-avoidance weight. The tracking displacement is $\mathbf e_i=\mathbf e_i^c$ on an obstacle-free map and $\mathbf e_i=\widetilde{\mathbf e}_i$ otherwise. Define
+
+
+\begin{equation}
+r_i=\lVert\mathbf e_i\rVert_2,
+\qquad
+\theta_i^\star=\mathrm{atan2}(e_{i,y},e_{i,x}).
 \end{equation}
 
 
@@ -1288,6 +1428,189 @@ and mean negative log predictive density, when evaluating against simulator trut
 These diagnostics use hidden truth only for evaluation; they are not controller inputs.
 
 
+\subsection{Closed-loop team-composition reconstruction evaluation}
+
+
+The composition study fixes $N=N_a+N_g$ and varies the aerial and ground
+counts while running the same coupled controllers and autoregressive MFGP. For
+the publication study, $N=10$ and $N_a\in\{10,2,0\}$. The named scenario
+parameters are
+
+
+\begin{equation}
+(K_s,T_s,n_{o,s},r_{o,s})
+=
+\begin{cases}
+(200,20,5,1), & s=\texttt{easy\_long},\\
+(100,10,15,2), & s=\texttt{hard\_short},
+\end{cases}
+\end{equation}
+
+
+where $K_s$ is the number of integration steps, $T_s=K_s\Delta t$ seconds,
+$n_{o,s}$ is the ground-obstacle count, $r_{o,s}$ is the obstacle radius, and
+$\Delta t=0.1$ s. Geometry and duration both change, so this is a comparison
+of bundled operating regimes rather than an independent-factor experiment. For
+composition $c$, episode $e$, and posterior publication $r$, let
+$\mathcal J_{c,e}$ denote the free query cells and define
+$\mu^+_{H,c,e,r,j}=\max(\mu_{H,c,e,r,j},0)$. The implemented normalized
+nonnegative-field reconstruction error is
+
+
+\begin{equation}
+\operatorname{NRMSE}_{c,e,r}
+=
+\frac{
+\sqrt{
+\frac{1}{|\mathcal J_{c,e}|}
+\sum_{j\in\mathcal J_{c,e}}
+(\mu^+_{H,c,e,r,j}-f_{H,c,e,j})^2
+}
+}{
+\max_{j\in\mathcal J_{c,e}}f_{H,c,e,j}
+-
+\min_{j\in\mathcal J_{c,e}}f_{H,c,e,j}
+}.
+\end{equation}
+
+
+With integration weights $w_j$, normalized hidden truth density
+$\phi_{c,e,j}$, and the positive-floor-renormalized posterior density
+$\widehat\phi_{c,e,r,j}$, the implemented KL divergence is
+
+
+\begin{equation}
+D_{\mathrm{KL},c,e,r}
+=
+\sum_{j:\phi_{c,e,j}>0}
+w_j\phi_{c,e,j}
+\log\!\left(
+\frac{\phi_{c,e,j}}{\widehat\phi_{c,e,r,j}}
+\right).
+\end{equation}
+
+
+Define the variance protected against numerical collapse by
+$\widetilde\sigma^2_{H,c,e,r,j}
+=\max(\sigma^2_{H,c,e,r,j},10^{-12})$. The implemented
+integration-weighted marginal Gaussian negative log predictive density is
+
+
+\begin{equation}
+\operatorname{NLPD}_{c,e,r}
+=
+\frac{1}{\sum_{j\in\mathcal J_{c,e}}w_j}
+\sum_{j\in\mathcal J_{c,e}}w_j
+\left[
+\frac{1}{2}\log(2\pi\widetilde\sigma^2_{H,c,e,r,j})
++
+\frac{(f_{H,c,e,j}-\mu_{H,c,e,r,j})^2}
+{2\widetilde\sigma^2_{H,c,e,r,j}}
+\right].
+\end{equation}
+
+
+This score uses the raw latent HIGH posterior mean and variance. It applies no
+nonnegative clipping or density normalization, adds no observation noise, and
+uses the marginal predictive density at each query rather than the joint
+cross-query covariance. Lower is better; a continuous predictive density can
+produce a negative NLPD.
+
+
+No density normalization is applied to either field score. The secondary
+empirical calibration diagnostic remains centred on the raw Gaussian-process
+mean rather than $\mu_H^+$:
+
+
+\begin{equation}
+C_{95,c,e,r}
+=
+\frac{1}{|\mathcal J_{c,e}|}
+\sum_{j\in\mathcal J_{c,e}}
+\mathbf 1\!\left[
+|f_{H,c,e,j}-\mu_{H,c,e,r,j}|
+\le
+1.96\sqrt{\sigma^2_{H,c,e,r,j}}
+\right].
+\end{equation}
+
+
+For a metric $m_r$ published at $t_0<\cdots<t_R\le T_s$, the evaluator holds
+the latest value to the fixed mission horizon and computes
+
+
+\begin{equation}
+\overline m
+=
+\frac{1}{T_s-t_0}
+\left[
+\sum_{r=0}^{R-1}
+\frac{m_r+m_{r+1}}{2}(t_{r+1}-t_r)
++m_R(T_s-t_R)
+\right].
+\end{equation}
+
+
+One active retention budget $B$ is split in proportion to composition. For
+$N_a,N_g>0$, the exact caps are
+
+
+\begin{equation}
+B_L
+=
+\left\lfloor B\frac{N_a}{N}\right\rfloor,
+\qquad
+B_H
+=
+B-B_L.
+\end{equation}
+
+
+At a homogeneous endpoint the active fidelity receives $B$; the inactive
+buffer receives an unused capacity of one because the retention class requires
+a positive cap. Both fidelities have the same sensing period and samples per
+robot per event, so each condition has $sN$ observation opportunities per
+sensing event. These budgets and all evaluation metrics are diagnostics and do
+not alter the controller laws.
+
+
+The composition experiment enables online empirical-Bayes kernel fitting.
+Every composition and episode starts from the same configured parameter vector
+$\boldsymbol\theta_0=(\ell_L,\sigma_L^2,\ell_\delta,\sigma_\delta^2)$ and uses
+the same bounds, minimum sample count $M_{\min}$, fit interval
+$K_{\mathrm{fit}}$, restart count, and iteration limit. For the candidate that
+would publish posterior version $r\ge1$, the exact scheduling rule is
+
+
+\begin{equation}
+\boldsymbol\theta_{c,e,r}
+=
+\begin{cases}
+\displaystyle\arg\min_{\boldsymbol\theta\in\mathcal B}
+\mathcal L_{c,e,r}(\boldsymbol\theta),
+& n_{L,c,e,r}+n_{H,c,e,r}\ge M_{\min}
+\ \text{and}\ (r-1)\bmod K_{\mathrm{fit}}=0,\\
+\boldsymbol\theta_{c,e,r-1}, & \text{otherwise}.
+\end{cases}
+\end{equation}
+
+
+The policy is controlled across conditions, but the realized fitted values are
+data-dependent and may differ. At A10/G0 the discrepancy parameters are not
+identified by LOW observations. At A0/G10, HIGH observations identify the
+combined HIGH covariance but do not separately identify its LOW and
+discrepancy components. Endpoint fitted values are therefore optimizer
+diagnostics rather than independent physical parameter estimates. Each saved
+posterior record includes the fit flag, optimization duration, and all four
+realized kernel parameters.
+
+
+For the publication protocol, $B=400$ and the LOW/HIGH caps are $(400,1)$,
+$(80,320)$, and $(1,400)$ for A10/G0, A2/G8, and A0/G10. With ten samples per
+robot every $0.5$ s, each composition submits 100 observations per event:
+4000 over the easy/long mission and 2000 over the hard/short mission.
+
+
 \subsection{Footprint-normalized ground coverage effectiveness}
 
 
@@ -1352,6 +1675,43 @@ footprint overlap, boundary clipping, obstacle clipping, and poor placement
 reduce the numerator. The evaluator saves both $M_{\mathrm{vis}}$ and
 $E_{\mathrm{cov}}$; only hidden truth is used, and neither quantity feeds back
 to a controller.
+
+For paired proposed-method/Egerstedt evaluation, method $m$ uses its saved
+ground states, field-of-view angle, and sensing range. At saved state time
+$t_k$, the exact implemented numerator for episode $e$ is
+
+\begin{equation}
+M_{\mathrm{vis},k}^{(m,e)}
+=
+\sum_j w_j\phi_j^{(e)}
+\mathbf 1\!\left[
+\mathbf q_j\in\bigcup_iF_{i,k}^{(m,e)}
+\right].
+\end{equation}
+
+The proposed method uses its saved headings to orient sectors. The Egerstedt
+baseline declares a $360$-degree disk, so its absent heading is represented by
+an immaterial zero. Each method receives its own equal-area oracle because the
+saved footprint geometries can differ. The evaluator saves the final score and
+the trapezoidal time average
+
+\begin{equation}
+\overline E_{\mathrm{cov}}^{(m,e)}
+=
+\frac{1}{t_K-t_0}
+\sum_{k=0}^{K-1}
+\frac{
+E_{\mathrm{cov},k}^{(m,e)}
++
+E_{\mathrm{cov},k+1}^{(m,e)}
+}{2}
+(t_{k+1}-t_k).
+\end{equation}
+
+Runtime comparison uses the saved total wall-clock duration of each complete
+method step. The evaluated archive retains the raw step totals and their
+per-episode mean, median, empirical 95th percentile, and maximum. These
+diagnostics do not feed back into either controller.
 
 
 \subsection{Separate Egerstedt comparison baseline}
@@ -1496,6 +1856,7 @@ Mathematical component & Primary implementation \\
 \midrule
 \endhead
 HIGH truth and Gaussian mixture & \href{../src/core/gmm.py}{\texttt{\detokenize{src/core/gmm.py}}}, \href{../src/coupled_simulation.py}{\texttt{\detokenize{src/coupled_simulation.py}}} \\
+Circular obstacle generation, masking, corner initialization, and motion guard & \href{../src/core/obstacles.py}{\texttt{\detokenize{src/core/obstacles.py}}}, \href{../src/coupled_simulation.py}{\texttt{\detokenize{src/coupled_simulation.py}}} \\
 LOW smoothing and sensor observations & \href{../src/models/sensors.py}{\texttt{\detokenize{src/models/sensors.py}}} \\
 Autoregressive GP and marginal likelihood & \href{../src/core/multifidelity_gp.py}{\texttt{\detokenize{src/core/multifidelity_gp.py}}} \\
 Asynchronous estimator and posterior publication & \href{../src/core/multifidelity_estimator.py}{\texttt{\detokenize{src/core/multifidelity_estimator.py}}} \\
@@ -1508,7 +1869,8 @@ MPC prediction dynamics & \href{../src/models/models.py}{\texttt{\detokenize{src
 Voronoi partition and Lloyd centroids & \href{../src/utils/voronoi.py}{\texttt{\detokenize{src/utils/voronoi.py}}}, \href{../src/coupled_simulation.py}{\texttt{\detokenize{src/coupled_simulation.py}}} \\
 MPC objective & \href{../src/core/costFunctions.py}{\texttt{\detokenize{src/core/costFunctions.py}}}, \href{../src/coupled_simulation.py}{\texttt{\detokenize{src/coupled_simulation.py}}} \\
 Coverage error & \href{../src/core/base.py}{\texttt{\detokenize{src/core/base.py}}} \\
-Footprint-normalized evaluation coverage & \href{../evaluation/multifidelity_metrics.py}{\texttt{\detokenize{evaluation/multifidelity_metrics.py}}}, \href{../evaluation/evaluate_multifidelity_ablation.py}{\texttt{\detokenize{evaluation/evaluate_multifidelity_ablation.py}}} \\
+Composition-sweep reconstruction evaluation & \href{../evaluation/run_multifidelity_composition.py}{\texttt{composition runner}}, \href{../evaluation/multifidelity_metrics.py}{\texttt{metric equations}}, \href{../evaluation/evaluate_multifidelity_composition.py}{\texttt{offline evaluator}}, \href{../evaluation/plot_multifidelity_composition.py}{\texttt{standalone plotter}}, \href{../evaluation/run_multifidelity_scenario_pipeline.py}{\texttt{scenario pipeline}} \\
+Footprint-normalized evaluation coverage & \href{../evaluation/multifidelity_metrics.py}{\texttt{\detokenize{evaluation/multifidelity_metrics.py}}}, \href{../evaluation/evaluate_multifidelity_ablation.py}{\texttt{\detokenize{evaluation/evaluate_multifidelity_ablation.py}}}, \href{../evaluation/evaluate_baseline_comparison.py}{\texttt{\detokenize{evaluation/evaluate_baseline_comparison.py}}} \\
 Egerstedt comparison baseline & \href{../evaluation/egerstedt.py}{\texttt{\detokenize{evaluation/egerstedt.py}}}, \href{../evaluation/run_egerstedt_comparison.py}{\texttt{\detokenize{evaluation/run_egerstedt_comparison.py}}} \\
 \bottomrule
 \end{longtable}

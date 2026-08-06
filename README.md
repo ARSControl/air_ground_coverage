@@ -68,6 +68,26 @@ The full configuration controls the fixed random seed, event periods, GP
 hyperparameters, robot models, and output path. Its default final-state figure
 is written to `output/multifidelity_final_state.png`.
 
+Run the complete optimization-enabled easy/long versus hard/short composition
+experiment, including evaluation and plots, with:
+
+```bash
+uv run python evaluation/run_multifidelity_scenario_pipeline.py \
+  --config configs/multifidelity_composition.yaml \
+  --composition A2/G8 \
+  --episode 0
+```
+
+The pipeline writes separate raw and evaluated archives, per-scenario metric
+and selected-episode trajectory/reconstruction/error figures, and the combined
+scenario metric figure below `output/multifidelity_scenario_pipeline/`.
+If compatible raw archives already exist, add `--reuse-raw` to recompute NLPD
+and regenerate every plot without rerunning any simulation or changing saved
+trajectories.
+The composition protocol deploys both robot classes from the lower-left 20% of
+the environment, using deterministic class-specific candidate sequences so
+conditions remain paired as team counts change.
+
 ## Configuration
 
 `configs/multifidelity.yaml` is the canonical self-contained configuration.

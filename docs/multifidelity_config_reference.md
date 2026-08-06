@@ -31,6 +31,48 @@ their respective view.
 | `simulation.random_seed` | `42` | Both | Base seed for truth, initial states, and deterministic sensor streams. | No monotonic effect; a different value produces a different but reproducible run. CLI `--seed` overrides it. |
 | `simulation.num_episodes` | `1` | Both | Default episode count for `evaluation.run_multifidelity_evaluation`. | Higher improves aggregate robustness estimates and increases runtime roughly proportionally. |
 
+The composition configuration additionally sets a common deployment policy:
+
+| Parameter | Publication value | Meaning |
+|---|---:|---|
+| `initialization.position_policy` | `corner` | Selects deterministic free-cell corner deployment. Omission or `uniform` preserves the historical uniform-free-cell initializer. |
+| `initialization.corner` | `lower_left` | Corner selected using minimum raster $x$ and $y$. The implementation also accepts `lower_right`, `upper_left`, and `upper_right`. |
+| `initialization.corner_fraction` | `0.2` | Fraction of map width and height defining the corner candidate rectangle; must lie in $(0,1]$. The run fails if it contains too few free cells. |
+
+Corner deployment uses independent episode-derived aerial and ground RNG
+streams. Candidate permutations and headings are nested within each robot
+class across compositions; changing the number of one class does not change
+the first initial states of the other class.
+
+## Composition-study protocol
+
+The following keys are specific to `configs/multifidelity_composition.yaml`
+and are consumed by `evaluation/run_multifidelity_composition.py`; they do not
+alter the general coupled CLI.
+
+| Parameter | Publication value | Meaning |
+|---|---:|---|
+| `composition_sweep.total_robots` | `10` | Fixed $N=N_a+N_g$ used for every declared composition and padded state width. |
+| `composition_sweep.aerial_counts` | `[10, 2, 0]` | Ordered aerial counts producing A10/G0, A2/G8, and A0/G10. |
+| `composition_sweep.total_retained_samples` | `400` | Fixed active LOW+HIGH retention budget, split in proportion to team makeup. |
+| `composition_sweep.default_scenario` | `easy_long` | Scenario used by the single-scenario Python API when no scenario is supplied. The CLI runs every declared scenario when `--scenario` is omitted. |
+| `composition_sweep.scenarios.<name>.num_steps` | `200` / `100` | Scenario-specific integration-step count. Explicit CLI `--num-steps` takes precedence and is recorded. |
+| `composition_sweep.scenarios.<name>.num_obstacles` | `5` / `15` | Scenario-specific deterministic circular ground-obstacle count. |
+| `composition_sweep.scenarios.<name>.obstacles_radius` | `1.0` / `2.0` | Scenario-specific common ground-obstacle radius. |
+
+Named scenarios must define all three override leaves; unknown scenarios,
+missing leaves, and unsupported leaves are rejected. Configurations without a
+`scenarios` mapping retain the historical single-scenario behavior and are
+recorded under the name `default`.
+
+The composition experiment enables
+`multifidelity.hyperparameter_optimization.enabled`. Every condition uses the
+same configured initial values, bounds, schedule, restarts, and iteration cap,
+but independently fitted values may differ with its retained LOW/HIGH data.
+The raw and evaluated archives store the fit decisions, durations, and realized
+kernel parameters for auditability. Its discrepancy-length lower bound is
+`3.0`, while the general coupled configuration below retains `1.5`.
+
 ## Map and simulated truth
 
 | Parameter | Current value | Status | Meaning | Expected effect when changed |
@@ -173,8 +215,8 @@ keys in this table belong to the old aerial GP or are known inactive wiring.
 |---|---:|---|---|---|
 | `ground.controller.type` | `lloyd` | Both | Selects the existing limited-FOV receding-horizon `mpc` law or density-weighted centroidal-Voronoi `lloyd` law. Both use the same density, grid, dynamics, and update rate. If omitted, the builder defaults to `mpc` for backward compatibility. | Categorical. `mpc` preserves prior behavior and optimization cost; `lloyd` removes the nonlinear solve and tracks each weighted cell centroid. |
 | `ground.simulation.num_agents` | `7` | Both | Number of ground robots. | Higher collects more HIGH samples and solves more MPC problems per step; runtime rises substantially. |
-| `ground.simulation.num_obstacles` | `0` | Inactive | Intended random-obstacle count. The coupled builder currently creates an obstacle-free map and does not instantiate these obstacles. | No current effect. |
-| `ground.simulation.obstacles_radius` | `1.0` | Inactive | Intended radius for generated ground obstacles. | No current effect. |
+| `ground.simulation.num_obstacles` | `0` | Both | Number of seeded, non-overlapping circular obstacles added to the ground occupancy map. Aerial motion retains the loaded aerial map. | Higher removes more ground free space and generally makes initialization and coverage motion harder. Zero preserves the obstacle-free path exactly. |
+| `ground.simulation.obstacles_radius` | `1.0` | Both | Common obstacle radius in aerial-map coordinate units. | Higher enlarges each ground exclusion region and the Lloyd repulsion influence distance. Values that cannot fit the requested obstacle set are rejected. |
 | `ground.agents.model_type` | `unicycle` | Both | Ground dynamics model used by the agent and MPC. | Categorical; changing it requires compatible MPC state/control dimensions. |
 | `ground.agents.max_velocity` | `4.0` | Both | Unicycle linear-speed clip. | Higher permits faster motion if the MPC command reaches it; current MPC controls are already bounded to ±`max_acceleration` (`2.5`). |
 | `ground.agents.max_acceleration` | `2.5` | Both | Current ground MPC control bound applied to both linear velocity and angular velocity, despite the name. | Higher allows more aggressive commands and may reduce solver robustness/safety; lower slows both translation and turning. |
@@ -183,7 +225,7 @@ keys in this table belong to the old aerial GP or are known inactive wiring.
 | `ground.agents.dt_agent` | `0.1` | Both | Ground agent state-integration step. | Higher executes larger/coarser state changes. Keep equal to `simulation.dt`, which is used inside the MPC model. |
 | `ground.agents.agent_radius` | `7.0` | Inactive for ground MPC | HEDAC coverage-footprint setting, but ground robots do not use HEDAC motion. | No current ground effect. |
 | `ground.agents.min_kernel_val` | `1e-6` | Inactive for ground MPC | HEDAC footprint cutoff inherited into ground parameters. | No current ground effect. |
-| `ground.agents.wall_avoidance_weight` | `1.0` | Inactive for ground MPC | HEDAC gradient parameter, not used by ground MPC. | No current ground effect. |
+| `ground.agents.wall_avoidance_weight` | `1.0` | Lloyd active | Gain on the Lloyd controller's bounded nearby-obstacle repulsion. A separate hard segment guard remains active at zero gain. | Higher turns centroid tracking away from occupied cells earlier; zero removes soft repulsion but cannot authorize collision. |
 | `ground.sensor.fov_degrees` | `360.0` | MF active | Angular span of HIGH samples and, for MPC only, half-angle of the coverage-cost FOV. Lloyd uses the full Voronoi cell independently of heading/FOV. | Higher broadens sensing and MPC visible coverage; with Lloyd it changes sensing only. |
 | `ground.sensor.fov_depth` | `7.0` | MF active | Maximum HIGH sample distance and, for MPC only, coverage-cost radius. Lloyd uses it for sensing but not centroid geometry. | Higher observes farther and increases MPC reach; with Lloyd it changes sensing only. |
 | `ground.multi_agent.sensing_range` | `10.0` | Inactive | Stored neighbor-detection range. | No current effect because neighbor updates are not called. |

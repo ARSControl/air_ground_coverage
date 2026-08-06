@@ -2,12 +2,892 @@
 
 ## Current Milestone
 
-The separate comparison-trajectory plotting milestone is **complete and
-verified on 2026-08-02**. One command now reads the paired proposed-method and
-Egerstedt archives and writes one independent plot into each method's result
-folder. Both files use the same episode, hidden-truth background, density color
-scale, axes, canvas dimensions, and endpoint conventions. No production or
-baseline control behavior changed.
+The common-corner composition-initialization milestone is **complete and
+verified on 2026-08-05**. Composition experiments now deploy both robot classes
+from a deterministic lower-left corner region while preserving uniform
+initialization as the default for other configurations.
+
+## Common-corner composition-initialization milestone
+
+- Files changed: `configs/multifidelity_composition.yaml`,
+  `configs/multifidelity_composition_smoke.yaml`, `src/coupled_simulation.py`,
+  `src/core/multifidelity_estimator.py`,
+  `evaluation/run_multifidelity_composition.py`,
+  `evaluation/evaluate_multifidelity_composition.py`, new
+  `tests/test_corner_initialization.py`,
+  `tests/test_multifidelity_estimator.py`,
+  `tests/test_multifidelity_composition_pipeline.py`, `README.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`,
+  `docs/multifidelity_config_reference.md`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/architecture/implementation_composition_sweep.md`,
+  `docs/architecture/scenario_comparison_design.md`, new
+  `docs/assets/corner_initialization_milestone.png`, and this status file.
+- The opt-in policy uses the free cells in the lower-left 20% by 20% rectangle.
+  Complete aerial and ground candidate permutations use episode seeds plus
+  `40000` and `50000`, respectively. Truncating those sequences to each team
+  count makes same-class initial states nested across compositions. Positions
+  are sampled without replacement, headings use the same class-specific
+  streams, and too few free corner cells cause an explicit failure.
+- Configurations that omit `initialization.position_policy`, including the
+  canonical non-composition configuration, retain the historical uniform
+  initializer and its global-RNG draw order. The raw and evaluated composition
+  archives now record the resolved initialization policy.
+- Corner deployment exposed a valid startup case in which every raw GP mean was
+  nonpositive. The estimator now publishes a uniform free-space controller
+  density only in that zero-positive-mass case. It preserves the actual raw
+  posterior mean and variance, so NRMSE, NLPD, calibration, and reconstruction
+  plots are not replaced or made artificially uniform. Other candidate-update
+  failures retain the most recent valid posterior as before.
+- Tests were added before production changes and initially failed all seven
+  corner contracts. After the first integration, broader tests exposed the
+  zero-mass startup failure; a dedicated negative-observation estimator test
+  reproduced it before the density fallback was implemented. The expanded
+  focused selection then passed `56/56`.
+- Deterministic real-output validation ran the complete two-scenario smoke
+  pipeline with one episode and wrote
+  `output/multifidelity_corner_pipeline_smoke`. In both scenarios, A2/G0 starts
+  aerial robots at `(1,0),(0,1)`, A1/G1 reuses aerial `(1,0)` and ground
+  `(1,1)`, and A0/G2 reuses ground `(1,1),(1,0)`. Successful posterior versions
+  were `[1,2,3]` for easy/long and `[1,2]` for hard/short. The real A1/G1
+  trajectory/truth/reconstruction/error figure was inspected at its original
+  2362-by-1964 resolution and saved as
+  `docs/assets/corner_initialization_milestone.png`; starts, paths, obstacles,
+  fields, error map, legend, and axes are readable.
+- Commands executed included the dedicated red/green corner tests, the
+  56-test estimator/obstacle/composition/trajectory selection, the complete
+  scenario smoke pipeline, the standalone milestone plotter, Ruff lint and
+  format checks, `git diff --check`, the full test suite, and a two-pass
+  `latexmk` build of the mathematical reference.
+- Validation: the full suite collected 247 tests; `243` passed. The four
+  failures are the previously documented unrelated expectations: canonical 300
+  versus configured 200 steps, orange versus current cyan ground trajectory
+  color, ablation 360-degree versus configured 90-degree ground FOV, and
+  required `posterior_version=` progress text. Ruff and formatting checks plus
+  `git diff --check` passed. LaTeX built a 21-page PDF successfully; existing
+  stream and table-width warnings remain.
+- Numerical and behavioral regressions: composition trajectories, observations,
+  fitted hyperparameters, and all reconstruction metrics intentionally change
+  because initial positions change. Previously saved uniformly initialized raw
+  archives cannot represent this protocol and must not be reused; the full
+  simulation pipeline must be rerun. Outside the opt-in composition configs,
+  initialization is unchanged. The only general behavioral change is the
+  uniform controller-density fallback for an all-nonpositive posterior; raw GP
+  outputs remain unchanged.
+
+## Optimization-enabled scenario-pipeline milestone
+
+- Files changed: `configs/multifidelity_composition_smoke.yaml`,
+  `evaluation/run_multifidelity_composition.py`,
+  `evaluation/evaluate_multifidelity_composition.py`,
+  `evaluation/plot_multifidelity_composition.py`,
+  `evaluation/plot_multifidelity_composition_trajectories.py`,
+  `evaluation/plot_multifidelity_scenario_comparison.py`, new
+  `evaluation/run_multifidelity_scenario_pipeline.py`,
+  `tests/test_multifidelity_composition_pipeline.py`, new
+  `tests/test_multifidelity_scenario_pipeline.py`,
+  `README.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/multifidelity_config_reference.md`,
+  `docs/architecture/implementation_composition_sweep.md`,
+  `docs/architecture/scenario_comparison_design.md`, and this status file.
+  The user-supplied publication configuration already had online optimization
+  enabled and a discrepancy-length lower bound of `3.0`; this milestone keeps
+  those choices and removes the runner guard that rejected them.
+- Every composition and episode starts from the same configured four kernel
+  values and uses the same bounds, minimum sample count, fit interval,
+  deterministic restart count, and iteration limit. The fitted values are
+  allowed to differ because each condition uses its own retained observations.
+  `rho`, observation-noise variances, and the Cholesky jitter policy remain
+  fixed. No new estimator or per-robot GP was introduced.
+- Every raw posterior record now stores whether optimization ran, its duration,
+  and the realized LOW length/variance and discrepancy length/variance. The
+  offline evaluator propagates these arrays and the complete optimization
+  policy. The two-scenario plotter rejects archives with different policies;
+  metric titles identify online optimization, and the episode plot reports the
+  final realized LOW and discrepancy length scales.
+- The new Python-only CLI runs exactly the two scenarios declared in YAML,
+  evaluates each archive, writes one aggregate metric plot and one explicitly
+  selected episode trajectory/truth/reconstruction/error plot per scenario,
+  and writes the combined scenario history plot. It executes the existing
+  stages sequentially and adds no multiprocessing, middleware, or networking.
+- Primary command:
+  `MPLCONFIGDIR=/tmp/ral_marta_mpl .venv/bin/python
+  evaluation/run_multifidelity_scenario_pipeline.py --config
+  configs/multifidelity_composition.yaml --composition A2/G8 --episode 0
+  --output-dir output/multifidelity_scenario_pipeline`.
+- Tests were added before production changes. The optimization test first
+  failed at the former `composition sweep requires fixed GP hyperparameters`
+  guard. The orchestration test then failed during collection because the new
+  module did not exist. After implementation, the focused
+  composition/trajectory/GP selection passed `87/87`.
+- Deterministic real-output validation used the smoke configuration with one
+  episode, `A1/G1`, 100 bootstrap samples, and output directory
+  `output/multifidelity_optimized_pipeline_smoke`. It produced two raw
+  archives, two evaluated archives, two 2220-by-1491-class metric PNGs, two
+  2362-by-1964 trajectory/reconstruction PNGs, and one 2180-by-1545 comparison
+  PNG. The comparison and easy trajectory figures were visually inspected at
+  original resolution; labels, online-optimization annotation, fitted kernel
+  values, trajectories, obstacles, fields, errors, legends, and axes are
+  readable and unclipped.
+- The smoke run produced nine fitted posterior records in `easy_long` and six
+  in `hard_short`. For easy A1/G1 the final LOW/discrepancy length scales were
+  `5.0/1.8655020077`, final NRMSE was `0.1444061003`, and final KL was
+  `2.8002040847`. For hard A1/G1 they were `2.4573193300/0.7134529719`,
+  `0.2211305987`, and `0.2917497744`. Several homogeneous endpoint parameters
+  hit or retained bounds, as expected from their single-fidelity
+  identifiability limitations; smoke values are diagnostics, not publication
+  evidence.
+- Validation: all 236 collected tests were executed in smaller groups after a
+  monolithic run terminated while retaining large archive fixtures. `232`
+  passed. Four unrelated existing expectations still fail: canonical 300 versus
+  configured 200 steps, orange versus current cyan final-plot ground paths,
+  ablation 360-degree versus configured 90-degree ground FOV, and required
+  `posterior_version=` progress text. Ruff check, Ruff format check, Python
+  compilation, and `git diff --check` passed. The LaTeX mathematical reference
+  built successfully in two passes; existing stream and table-width warnings
+  remain.
+- Mathematical documentation now states the exact composition-specific fitting
+  schedule, including the `(r-1) mod K_fit` condition, and distinguishes common
+  optimization policy from data-dependent realized parameters. Evaluation
+  equations, controller laws, field transforms, sensor laws, robot dynamics,
+  and legacy mode are unchanged.
+- Numerical and behavioral regressions: composition trajectories and metrics
+  intentionally change relative to fixed-kernel archives because fitting is now
+  active in the closed loop and therefore changes posterior feedback. Runtime
+  also includes scheduled optimization. No behavior outside the composition
+  experiment was changed.
+
+## Scenario time-series figure milestone
+
+- Files changed: `evaluation/plot_multifidelity_scenario_comparison.py`,
+  `tests/test_multifidelity_composition_pipeline.py`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/architecture/implementation_composition_sweep.md`,
+  `docs/architecture/scenario_comparison_design.md`,
+  `docs/assets/scenario_time_series_metrics_milestone.png`, and this status
+  file.
+- The comparison figure is now a 2-by-2 time-series layout: easy/long NRMSE,
+  easy/long KL divergence, hard/short NRMSE, and hard/short KL divergence. All
+  panels use physical mission time, episode means, and deterministic bootstrap
+  95% bands with a shared composition color mapping. Y limits are shared by
+  metric column (NRMSE across rows and KL across rows), while x limits remain
+  scenario-specific because the mission horizons differ.
+- Final and time-averaged NRMSE/KL arrays remain unchanged in evaluated
+  archives for tables and offline analysis; the figure simply no longer calls
+  the summary-panel helper or displays those aggregates.
+- The regression test was added first and failed because the plotter still
+  invoked `_plot_summary`. After implementation it records the metric requested
+  by every history call and requires the exact sequence `nrmse`, `kl`, `nrmse`,
+  `kl`; it also asserts column-wise y sharing and independent x axes.
+- Visual regeneration command: `MPLCONFIGDIR=/tmp/ral_marta_mpl
+  .venv/bin/python evaluation/plot_multifidelity_scenario_comparison.py --easy
+  /tmp/default_both_easy_long_evaluated.npz --hard
+  /tmp/default_both_hard_short_evaluated.npz --output
+  docs/assets/scenario_time_series_metrics_milestone.png --bootstrap-samples
+  100`. The 2180-by-1545 deterministic smoke PNG was inspected; all four
+  histories, scenario-specific time axes, metric labels, titles, grid lines,
+  and composition legend are readable and unclipped. Its numerical values are
+  pipeline diagnostics, not publication results.
+- Mathematical documentation: evaluation metrics and time averaging are
+  unchanged. This is a visualization-only selection change, so no estimator,
+  field, sensor, controller, motion, scheduler, discretization, or metric
+  equation changed.
+- Numerical and behavioral regressions: none. Evaluation archives and all
+  simulation outputs are byte-independent of this read-only plotting change.
+- Validation: the focused composition/trajectory selection passed `25/25`;
+  Ruff lint/formatting, Python compilation, and `git diff --check` passed. The
+  full suite passed 228 tests with five failures. Four are the previously
+  documented canonical-step, final-plot color, ablation-FOV, and CLI-progress
+  mismatches. The fifth reflects a concurrent user edit of the publication
+  aerial counts to `[10,4,2,0]` while the existing frozen constant/test still
+  declares `[10,2,0]`; this plotting milestone preserves that edit and does
+  not silently redefine the experiment protocol.
+
+## Default-all-scenarios CLI milestone
+
+This preceding milestone remains current for zero-argument scenario execution
+and output naming.
+
+- Files changed: `evaluation/run_multifidelity_composition.py`,
+  `tests/test_multifidelity_composition_pipeline.py`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/multifidelity_config_reference.md`,
+  `docs/architecture/implementation_composition_sweep.md`,
+  `docs/architecture/scenario_comparison_design.md`,
+  `docs/assets/default_all_scenarios_cli_milestone.png`, and this status file.
+- CLI omission of `--scenario` reads every key in
+  `composition_sweep.scenarios` in configuration order. For a requested path
+  `composition_raw.npz`, the current protocol writes
+  `composition_easy_long_raw.npz` and `composition_hard_short_raw.npz`; the
+  unsuffixed path is not written, so one scenario cannot overwrite another.
+- Supplying `--scenario NAME` preserves exact single-scenario behavior and uses
+  the exact `--output` path. Configurations with no named scenarios also retain
+  the historical one-archive behavior. The programmatic
+  `run_composition_sweep()` API remains a single-scenario function and still
+  uses `default_scenario` when its scenario argument is omitted.
+- The regression test was added first and failed because only the unsuffixed
+  easy/default archive existed. It then passed after CLI orchestration and
+  output naming were implemented. The complete focused composition and
+  trajectory selection passed `25/25`.
+- End-to-end regeneration omitted `--scenario` with the deterministic smoke
+  configuration and printed two paths:
+  `/tmp/default_both_easy_long_raw.npz` and
+  `/tmp/default_both_hard_short_raw.npz`. Both were evaluated and combined with
+  the existing scenario-comparison plotter. Visual regeneration used
+  `docs/assets/default_all_scenarios_cli_milestone.png`; the 2180-by-1545 image
+  was inspected and all panels, scenario-specific time axes, legends, labels,
+  and titles are readable and unclipped.
+- Full validation passed 229 tests. The same four unrelated workspace failures
+  remain: canonical steps 200 versus a test expecting 300, final-plot ground
+  color cyan versus a test expecting orange, ablation ground FOV 90 degrees
+  versus canonical 360 degrees, and CLI progress missing `posterior_version`.
+  Ruff lint/formatting, Python compilation, and `git diff --check` passed.
+- Mathematical documentation: no estimator, metric, field transform, sensing,
+  controller, motion, discretization, or scheduler equation changed; only CLI
+  orchestration changed, so the mathematical reference remains current.
+- Numerical and behavioral regressions: none. Each individual scenario invokes
+  the same runner with the same resolved inputs as an explicit invocation. The
+  change affects only which scenarios the CLI schedules and how multiple raw
+  output paths are named.
+
+## Easy/long versus hard/short composition milestone
+
+This preceding milestone remains current for the scenario definitions,
+archive metadata, evaluator, and comparison-plot semantics.
+
+- Files changed: `configs/multifidelity_composition.yaml`,
+  `configs/multifidelity_composition_smoke.yaml`,
+  `evaluation/run_multifidelity_composition.py`,
+  `evaluation/evaluate_multifidelity_composition.py`,
+  `evaluation/plot_multifidelity_composition.py`,
+  `evaluation/plot_multifidelity_composition_trajectories.py`, new
+  `evaluation/plot_multifidelity_scenario_comparison.py`,
+  `tests/test_multifidelity_composition_pipeline.py`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/multifidelity_config_reference.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`,
+  `docs/architecture/implementation_composition_sweep.md`, new
+  `docs/architecture/scenario_comparison_design.md`,
+  `docs/assets/easy_long_hard_short_composition_milestone.png`, and this
+  status file.
+- The publication composition list is now `(10, 2, 0)`: homogeneous A10/G0
+  and A0/G10 bracket the operationally motivated A2/G8 scout-plus-ground team.
+  The prior broader sweep is pilot evidence and must not be described as the
+  confirmatory protocol.
+- `composition_sweep.scenarios` declares `easy_long` as 200 steps, five
+  radius-one ground circles and `hard_short` as 100 steps, fifteen radius-two
+  circles. With `dt=0.1`, their horizons are 20 and 10 simulated seconds. Both
+  duration and geometry change, so this implementation compares bundled
+  operating regimes and cannot identify an obstacle-only or duration-only
+  causal effect.
+- The single-scenario runner API accepts a scenario name; omission selects
+  `default_scenario`. It resolves step count and ground geometry before
+  building each existing production simulation and records the scenario name, exact resolved
+  parameters, and scenario-resolved aerial/ground configurations. An explicit
+  `--num-steps` remains the highest-precedence development override and is
+  recorded honestly.
+- One scenario is stored per raw archive. This preserves the existing
+  rectangular composition/episode/time array contract even though the two
+  scenarios have different horizons. Configurations without named scenarios
+  and old raw/evaluated archives remain supported under the synthetic name
+  `default`; no archive schema version changed.
+- The evaluator propagates scenario metadata but uses the existing metric
+  equations. The single-scenario plotter and saved-episode trajectory title now
+  identify the scenario. The new comparison plotter reads two evaluated
+  archives only, requires matching composition/count/seed arrays, and plots
+  scenario-specific zero-clipped NRMSE histories plus final/time-averaged
+  summaries.
+- The active retention budget remains 400. A10/G0, A2/G8, and A0/G10 receive
+  LOW/HIGH caps `(400,1)`, `(80,320)`, and `(1,400)`. Every composition submits
+  100 observations per sensing event; the easy/long and hard/short horizons
+  therefore submit 4000 and 2000 observations per episode respectively.
+- Tests were added before implementation. The first red run failed collection
+  because the new comparison plotter was absent. A second red test found that
+  resolved hard-scenario metadata still reported base values, and a third
+  found that legacy single-scenario obstacle defaults were incorrectly read
+  from the aerial rather than ground parameter view. All three defects were
+  fixed before broader validation.
+- Deterministic end-to-end validation commands ran the smoke configuration
+  once with `--scenario easy_long` and once with `--scenario hard_short`, wrote
+  separate `/tmp/composition_*_smoke_raw.npz` archives, evaluated both, and
+  combined them with `evaluation/plot_multifidelity_scenario_comparison.py`.
+  Easy/long saved shape `(3,1,7,2,6)`, one three-cell obstacle, six submitted
+  samples per composition, and final NRMSE `[0.23826975, 0.10887563,
+  0.27799765]`. Hard/short saved shape `(3,1,5,2,6)`, two six-cell obstacles,
+  four submitted samples per composition, and final NRMSE `[0.28388622,
+  0.19192342, 0.27836863]`. These are pipeline diagnostics, not publication
+  evidence.
+- A separate construction smoke check used the publication configuration with
+  `--scenario hard_short --episodes 1 --num-steps 12`. It produced A10/G0,
+  A2/G8, and A0/G10 with state shape `(3,1,13,10,6)`, the exact resolved
+  fifteen radius-two obstacles, 190 identical occupied cells per composition,
+  and 300 submitted observations per composition over three sensing events.
+  The explicit 12-step override was recorded and this short archive is not a
+  substitute for the declared 100-step hard mission.
+- Visual regeneration command: `MPLCONFIGDIR=/tmp/ral_marta_mpl
+  .venv/bin/python evaluation/plot_multifidelity_scenario_comparison.py --easy
+  /tmp/composition_easy_long_smoke_evaluated.npz --hard
+  /tmp/composition_hard_short_smoke_evaluated.npz --output
+  docs/assets/easy_long_hard_short_composition_milestone.png
+  --bootstrap-samples 100`. The 2180-by-1545 PNG was visually inspected: all
+  four panels, separate time axes, scenario labels, composition legend,
+  summary legends, and axis labels are readable and unclipped.
+- A geometry-only audit of all 30 publication hard-scenario seeds completed
+  without generation failure. Fifteen radius-two circles occupy 7.28% to 7.84%
+  of the 50-by-50 raster (mean 7.584%); the largest free component contains at
+  least 99.9568% of free cells. This verifies feasible, essentially connected
+  clutter without using reconstruction outcomes to tune geometry. It does not
+  by itself prove a particular ground-reachability reduction.
+- Validation: focused scenario/trajectory/obstacle/documentation tests passed
+  `34/34`; the full suite passed 228 tests. Four unrelated workspace failures
+  remain: canonical steps 200 versus a test expecting 300, final-plot ground
+  color cyan versus a test expecting orange, ablation ground FOV 90 degrees
+  versus canonical 360 degrees, and CLI progress missing `posterior_version`.
+  Ruff lint and formatting, Python compilation, and `git diff --check` passed.
+  The LaTeX mathematical reference built successfully; existing underfull and
+  table-width warnings remain.
+- Numerical and behavioral regressions: estimator mathematics, target
+  densities, controller laws, sensor equations, robot dynamics, logical
+  scheduling, legacy mode, and existing archive arrays are unchanged. Expected
+  protocol changes are the reduced composition set and scenario-specific
+  horizon, obstacle geometry, submitted counts, metadata, and output files.
+
+## Ten-robot composition-protocol alignment milestone
+
+This preceding milestone records the broader six-composition pilot protocol.
+It is preserved historically and is superseded for new confirmatory runs by
+the three-composition, two-scenario protocol above.
+
+- The user-updated `configs/multifidelity_composition.yaml` fixes `N=10` and
+  aerial counts `[10, 8, 6, 4, 2, 0]`. Files aligned in this milestone are
+  `evaluation/run_multifidelity_composition.py`,
+  `tests/test_multifidelity_composition_pipeline.py`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/architecture/implementation_composition_sweep.md`,
+  `docs/assets/team_composition_ten_robot_protocol_milestone.png`, and this
+  status file.
+- The exported publication count contract is now
+  `DEFAULT_AERIAL_COUNTS = (10, 8, 6, 4, 2, 0)`. The runner itself continues
+  to read `total_robots` and `aerial_counts` from configuration, pads state
+  arrays to the configured total, and saves resolved counts and labels in the
+  raw archive. No estimator, controller, robot, sensor, or scheduler production
+  path changed.
+- The evaluator and both composition plotters required no code changes. They
+  derive composition count, labels, active A/G counts, aerial fractions, and
+  legend entries from the archive. An existing eight-robot raw archive remains
+  evaluable and plottable as an eight-robot result, but it cannot be converted
+  into ten-robot evidence: the 30-episode composition simulation must be rerun
+  before reporting the new protocol.
+- The fixed active retention budget remains 400. In A10/G0 through A0/G10
+  order, the LOW/HIGH caps are `(400,1)`, `(320,80)`, `(240,160)`, `(160,240)`,
+  `(80,320)`, and `(1,400)`, where endpoint caps of one are inactive
+  placeholders. Ten robots with ten samples per robot submit 100 observations
+  per sensing event and 4000 over the configured 20-second episode, independent
+  of composition.
+- The regression test was changed before the runner constant. Its red run
+  produced one expected protocol failure and 12 passes because the constant
+  still omitted A10/G0. After implementation, the composition and trajectory
+  selection passed all 20 tests.
+- Deterministic real-output validation used:
+  `.venv/bin/python evaluation/run_multifidelity_composition.py --config
+  configs/multifidelity_composition.yaml --output
+  /tmp/multifidelity_composition_n10_raw.npz --episodes 1 --num-steps 12
+  --no-progress`, followed by the offline evaluator and metric plotter. The raw
+  archive contains labels `A10/G0`, `A8/G2`, `A6/G4`, `A4/G6`, `A2/G8`, and
+  `A0/G10`; both state arrays have shape `(6, 1, 13, 10, 6)`, and 12 posterior
+  records were evaluated. Each condition submitted exactly 300 observations
+  during the three sensing events in this shortened run.
+- Visual regeneration command:
+  `MPLCONFIGDIR=/tmp/ral_marta_mpl .venv/bin/python
+  evaluation/plot_multifidelity_composition.py --input
+  /tmp/multifidelity_composition_n10_evaluated.npz --output
+  docs/assets/team_composition_ten_robot_protocol_milestone.png
+  --bootstrap-samples 100`. The 2144-by-1491 PNG was inspected at original and
+  resized resolution; its two history panels, two aerial-fraction summaries,
+  N=10 title, all six labels, and axes are readable and unclipped. This
+  one-episode, 1.2-second run is a pipeline-validation artifact, not a
+  scientific composition result.
+- Full validation passed 224 tests. Four unrelated workspace failures remain:
+  canonical configuration steps 200 versus a test expecting 300, final-plot
+  ground color cyan versus a test expecting orange, ablation ground FOV 90
+  degrees versus canonical 360 degrees, and CLI progress text missing
+  `posterior_version`. Ruff, Python compilation, and `git diff --check` passed.
+- Numerical and behavioral regressions: none outside the intentional protocol
+  expansion. The new full runs will have ten-slot state padding, six
+  compositions, and 100 rather than 80 submitted observations per sensing
+  event. The retained GP training budget is still capped at 400, so increasing
+  robot count changes spatial sampling opportunity but not maximum active
+  training-set size.
+
+## Zero-clipped reconstruction evaluation milestone
+
+This preceding milestone remains current for metric semantics: field
+reconstruction plots and NRMSE evaluation use `max(high_mean, 0)`, density
+normalization remains separate, and posterior calibration retains the raw
+Gaussian mean and variance.
+
+- Files changed: `evaluation/multifidelity_metrics.py`,
+  `evaluation/evaluate_multifidelity_composition.py`,
+  `evaluation/evaluate_multifidelity_ablation.py`,
+  `evaluation/plot_multifidelity_composition.py`,
+  `evaluation/plot_multifidelity_ablation.py`,
+  `evaluation/plot_multifidelity_composition_trajectories.py`,
+  `tests/test_multifidelity_ablation_pipeline.py`,
+  `tests/test_multifidelity_composition_pipeline.py`,
+  `docs/assets/composition_trajectory_plotter_milestone.png`,
+  `docs/assets/team_composition_reconstruction_zero_clipped_milestone.png`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`,
+  `docs/architecture/implementation_composition_sweep.md`, and this status
+  file.
+- The pure evaluation helper `clipped_reconstruction` implements
+  $\mu_H^+=\max(\mu_H,0)$ without density normalization. The shared `nrmse`
+  function now applies this transform, so both composition and ablation
+  evaluators use the same zero-clipped reconstruction automatically.
+- KL evaluation is unchanged because it already consumes the saved
+  nonnegative normalized posterior density. Empirical 95% calibration remains
+  centred on the raw GP mean with raw posterior variance; clipping its centre
+  would no longer evaluate the stated Gaussian posterior interval.
+- The episode CLI plots $\mu_H^+$ and computes its absolute error against
+  hidden HIGH truth on free queries. Truth and reconstruction share a common
+  scale whose minimum is now zero for nonnegative truth. Panel titles and the
+  composition/ablation metric plot labels explicitly identify zero clipping.
+- Tests were added before implementation. The red run failed during collection
+  because `clipped_reconstruction` did not exist. The final focused selection
+  passed `9/9`, including an exact negative/zero/positive clipping contract,
+  an NRMSE case whose negative mean must contribute as zero, evaluated-archive
+  metadata, endpoint pipeline execution, latest-posterior selection, and PNG
+  generation.
+- Full-archive evaluation command used without overwriting the user's existing
+  evaluated archive: `.venv/bin/python
+  evaluation/evaluate_multifidelity_composition.py --input
+  output/multifidelity_composition_raw.npz --output
+  /tmp/multifidelity_composition_clipped_evaluated.npz --no-progress`.
+  In A8/G0 through A0/G8 order, mean final clipped NRMSE is `0.12419998`,
+  `0.11290556`, `0.10427253`, `0.10301847`, and `0.08232371`; the corresponding
+  previous raw-mean values in the existing evaluated archive are `0.14941907`,
+  `0.13746364`, `0.13199190`, `0.12997328`, and `0.11638623`. These are a metric
+  definition change, not new trajectories or posterior fits.
+- Visual regeneration uses the existing trajectory CLI command recorded below.
+  For A2/G6 episode zero, the selected version-20 reconstruction at time 19 s
+  has zero-clipped free-space RMSE `0.114485994786`, maximum absolute error
+  `0.590275029077`, and minimum reconstructed value exactly zero. The
+  regenerated 2382-by-1964 PNG was inspected at original resolution; all four
+  panels, shared truth/reconstruction scale, obstacle masks, labels, and
+  colorbars are readable and unclipped.
+- Full repeated-run metric visual regeneration command:
+  `MPLCONFIGDIR=/tmp/ral_marta_mpl .venv/bin/python
+  evaluation/plot_multifidelity_composition.py --input
+  /tmp/multifidelity_composition_clipped_evaluated.npz --output
+  docs/assets/team_composition_reconstruction_zero_clipped_milestone.png
+  --bootstrap-samples 1000`. The 2144-by-1491 PNG was inspected at original
+  resolution; zero-clipped NRMSE histories, bootstrap bands, final/time-average
+  summaries, unchanged KL panels, labels, and legends are readable and
+  unclipped. The earlier `team_composition_reconstruction_milestone.png` is a
+  preserved historical artifact using the superseded raw-mean NRMSE definition
+  and must not be used for the current metric.
+- Mathematical documentation now defines NRMSE using $\mu_H^+$ and separately
+  states why calibration retains raw $\mu_H$. No GP posterior, controller
+  density, sensor, scheduler, motion, or simulation equation changed.
+- Numerical and behavioral regressions: raw archives, posterior means,
+  variances, densities, trajectories, and KL values are unchanged. NRMSE values
+  intentionally decrease wherever negative raw means previously added error.
+  Existing evaluated archives retain the old definition and must be regenerated
+  before reporting clipped-NRMSE results.
+- Validation results: the broader ablation/composition/trajectory selection
+  passed `30` tests and retained only the documented ablation-FOV and
+  10-versus-8-robot protocol mismatches. The full suite passed `222` tests with
+  the same five unrelated failures recorded in the preceding milestone. Ruff
+  lint, changed/new-file formatting, Python compilation, and `git diff --check`
+  passed. The LaTeX mathematical reference built successfully; only existing
+  table-width and environment stream warnings remain.
+
+## Saved composition-trajectory CLI milestone
+
+The original version below displayed the raw latent posterior mean; the
+zero-clipped reconstruction milestone above supersedes that display and its
+reported raw-mean error diagnostics while retaining the same CLI selection and
+archive-reading behavior.
+
+- Files changed: `evaluation/plot_multifidelity_composition_trajectories.py`,
+  `tests/test_plot_multifidelity_composition_trajectories.py`,
+  `docs/assets/composition_trajectory_plotter_milestone.png`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/architecture/implementation_composition_sweep.md`, and this status
+  file.
+- The CLI requires `--composition` to be one exact label stored in the raw
+  archive and accepts an explicit zero-based `--episode` index, defaulting to
+  zero. Omitting `--output` produces an unambiguous path of the form
+  `output/multifidelity_composition_trajectories/A2_G6_episode_000.png`.
+- The plotter reads the raw archive only. It selects active state slots using
+  the saved aerial/ground counts, validates that active trajectories are
+  finite, and supports aerial-only, mixed, and ground-only endpoints despite
+  their `NaN`-padded inactive slots. It does not import a controller or mutate
+  the archive.
+- Each figure has four panels: saved trajectories over the hidden HIGH field,
+  standalone hidden HIGH truth, the last saved latent HIGH posterior mean, and
+  absolute latent-field error. Truth and reconstruction use one common color
+  scale; obstacle queries are masked consistently with reconstruction metrics.
+  The trajectory panel overlays the saved binary ground map, uses blue aerial
+  and orange ground paths, and marks initial positions with circles and final
+  positions with crosses. The title records composition, episode index, seed,
+  and mission time.
+- Tests were added before implementation. The red test failed during
+  collection with `ModuleNotFoundError` for the new plotting module. After
+  implementation, all seven dedicated tests passed, covering CLI parsing/direct
+  execution, both homogeneous endpoints, a mixed team, deterministic selection
+  of the latest step/time/version posterior, invalid selection, PNG output, and
+  raw-archive immutability.
+- The combined new/existing composition selection passed 18 tests and retained
+  one workspace protocol failure: the current publication YAML declares 10
+  robots and aerial counts `[10, 8, 6, 4, 2, 0]`, while the pre-existing test
+  still asserts the former eight-robot protocol. Neither file was changed by
+  this plotting milestone.
+- Visual regeneration command:
+  `MPLCONFIGDIR=/tmp/ral_marta_mpl .venv/bin/python
+  evaluation/plot_multifidelity_composition_trajectories.py --input
+  output/multifidelity_composition_raw.npz --composition A2/G6 --episode 0
+  --output docs/assets/composition_trajectory_plotter_milestone.png`.
+  This reads the real 30-episode, 200-step archive and renders episode index
+  zero (seed 42), with two aerial and six ground paths over five radius-one
+  obstacles occupying 15 cells. The final saved reconstruction is posterior
+  version 20 at step 190 and simulated time 19 seconds; on free queries its
+  RMSE is `0.136137448624` and maximum absolute error is
+  `0.659669780314`. The A2/G6 selection is an explicit visual validation input,
+  not an ablation choice or optimality claim.
+- The 2384-by-1964 PNG was visually inspected at original resolution. The
+  complete 20-second trajectories, truth, reconstruction, error, obstacles,
+  markers, legend, titles, axes, and colorbars are readable and unclipped.
+- Architecture comparison: one new read-only branch leaves the raw archive and
+  ends at a PNG. The estimator, sensor streams, scheduler, controllers, maps,
+  robot dynamics, trajectory arrays, metric evaluator, approved target, and
+  legacy mode are unchanged.
+- Mathematical documentation: no estimator, field transform, sensor law,
+  controller, motion model, discretization, scheduler, or metric changed, so
+  `docs/mathematical_formulation.md` and its LaTeX source remain current.
+- Numerical and behavioral regressions: none. The figure reads and displays
+  saved arrays only; it cannot change the previously recorded episode or any
+  reconstruction result.
+- The full suite completed with `222` passes and five unrelated failures: the
+  four previously recorded canonical-step, trajectory-color, ablation-FOV, and
+  CLI-progress mismatches, plus the current 10-robot publication YAML versus
+  eight-robot test expectation described above. Ruff lint/formatting, Python
+  compilation, and `git diff --check` passed for the new Python files.
+
+## Deterministic circular ground-obstacle milestone
+
+- Files changed: `src/core/obstacles.py`, `src/coupled_simulation.py`,
+  `src/simulation.py`, `configs/multifidelity_composition.yaml`,
+  `configs/multifidelity_composition_smoke.yaml`,
+  `evaluation/run_multifidelity_composition.py`,
+  `evaluation/run_multifidelity_ablation.py`,
+  `evaluation/run_multifidelity_comparison.py`,
+  `tests/test_circular_ground_obstacles.py`,
+  `tests/test_multifidelity_composition_pipeline.py`,
+  `examples/plot_ground_obstacles_milestone.py`,
+  `docs/assets/circular_ground_obstacles_milestone.png`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/multifidelity_config_reference.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`,
+  `docs/architecture/implementation_composition_sweep.md`,
+  `docs/architecture/implementation_ground_obstacles.md`, and this status
+  file.
+- `generate_circular_obstacle_map` uses a dedicated NumPy generator seeded by
+  `episode_seed + 30000`. It samples the exact requested number of continuous
+  circle centres inside the raster boundary, rejects centre distances at or
+  below twice the configured radius, rasterizes cell centres inside each
+  circle, and rejects infeasible inputs rather than silently changing the
+  protocol.
+- `CoupledSimulation` exposes immutable `ground_map`,
+  `ground_obstacle_centers`, and `ground_obstacle_radius` state. Generated
+  circles are unioned into the ground map only; the HEDAC/aerial motion map is
+  unchanged so aerial robots may overfly ground obstacles. Ground robots are
+  initialized from ground-free cells.
+- The hidden HIGH field and smoothed LOW field use the two-dimensional ground
+  free mask. The estimator receives a separate nearest-cell query mask, so
+  published target density is exactly zero at obstacle queries. Composition,
+  ablation, and comparison raw archives now record the ground map and evaluate
+  reconstruction on its free cells.
+- Lloyd motion combines the existing weighted centroid displacement with a
+  bounded nearby-occupied-cell repulsion using
+  `ground.agents.wall_avoidance_weight`. A heading-first unicycle segment guard
+  samples proposed motion at no more than 0.25 map-unit spacing, suppresses
+  translation across obstacles or map boundaries, and retains turning. The
+  same hard guard protects the unicycle MPC compatibility path. It is bypassed
+  exactly on all-free maps.
+- The publication composition configuration now freezes five ground circles
+  of radius `1.0`; the smoke protocol uses one radius-one circle. Because
+  obstacle placement depends only on the paired episode seed, all five team
+  compositions receive identical maps and hidden fields within an episode.
+- Tests were written before production changes. The red run failed at
+  collection with `ModuleNotFoundError: src.core.obstacles`. After
+  implementation, the dedicated obstacle plus composition selection passed
+  `19/19`; the final obstacle, composition, scheduler, and Lloyd selection
+  passed `36/36`.
+- End-to-end smoke commands completed successfully: the composition runner
+  wrote `/tmp/obstacle_composition_raw.npz`, and the offline evaluator wrote
+  `/tmp/obstacle_composition_evaluated.npz`. The raw runner uses the ground map
+  for paired free masks and truth-density normalization.
+- Visual regeneration command:
+  `MPLCONFIGDIR=/tmp/ral_marta_mpl .venv/bin/python
+  examples/plot_ground_obstacles_milestone.py`. The four panels show the
+  obstacle-free aerial motion map with circle outlines, the occupied ground
+  map and trajectories, the masked hidden HIGH field, and the masked posterior
+  target density from a deterministic A2/G6 validation run. This illustrative
+  team is not a selected ablation composition or an optimality claim.
+- Fixed-seed visual diagnostics: five radius-one circles occupied 15 raster
+  cells; all 246 saved ground states were free; the final posterior version was
+  four; and maximum target density across obstacle queries was exactly zero.
+  The regenerated 2085-by-1694 pixel image was inspected at original
+  resolution; circle alignment, trajectories, titles, axes, legends, and
+  colorbars are readable and unclipped.
+- The full suite completed with `216` passes and the same four known unrelated
+  failures: a stale expectation of 300 rather than 200 canonical steps, the
+  old orange rather than current cyan ground-trajectory color, the existing
+  canonical/ablation 360/90-degree ground-FOV mismatch, and missing
+  `posterior_version=` text in CLI progress messages. No obstacle test or
+  affected controller/scheduler test failed.
+- Ruff lint passed for all affected Python files. Ruff formatting passed for
+  the new and directly modified formatted files; the two existing evaluation
+  runners retain their pre-existing formatting differences to avoid rewriting
+  unrelated dirty-worktree edits. Python compilation and `git diff --check`
+  passed.
+- The mathematical reference records exact placement, rasterization, split-map
+  semantics, field/query masking, repulsion, and discrete segment-guard
+  equations. `latexmk -pdf -interaction=nonstopmode -halt-on-error
+  mathematical_formulation.tex` completed in two passes; only existing table
+  width warnings and environment stream warnings remain.
+- Architecture comparison: the implementation matches the preserved target
+  diagram. It adds no estimator, per-robot GP, concurrency, middleware, or
+  aerial no-fly behavior. The legacy estimator branch remains selectable and
+  obstacle-free configurations retain their prior control updates.
+- Numerical and behavioral regressions: none in obstacle-free focused tests.
+  Enabling obstacles intentionally changes truth support, ground initial
+  states, trajectories, observations, and reconstruction metrics. Therefore
+  the earlier 30-episode obstacle-free composition archive is not directly
+  comparable to the new publication protocol and must be regenerated before
+  drawing updated composition conclusions.
+
+## Closed-loop team-composition reconstruction milestone
+
+- Files changed: `configs/multifidelity_composition.yaml`,
+  `configs/multifidelity_composition_smoke.yaml`,
+  `evaluation/multifidelity_composition_io.py`,
+  `evaluation/run_multifidelity_composition.py`,
+  `evaluation/evaluate_multifidelity_composition.py`,
+  `evaluation/plot_multifidelity_composition.py`,
+  `tests/test_multifidelity_composition_pipeline.py`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`,
+  `docs/architecture/implementation_composition_sweep.md`,
+  `docs/assets/team_composition_reconstruction_milestone.png`, and this status
+  file.
+- The publication configuration fixes eight total robots and sweeps A8/G0,
+  A6/G2, A4/G4, A2/G6, and A0/G8 over 30 paired episodes. The smoke
+  configuration uses the smaller A2/G0, A1/G1, and A0/G2 sweep. Both endpoint
+  teams use the same autoregressive MFGP: no single-fidelity replacement model
+  is constructed.
+- The runner uses equal LOW/HIGH sensing periods and equal observations per
+  robot per event. It divides one fixed active retention budget in proportion
+  to each composition, uses a positive unused placeholder cap for the absent
+  fidelity at homogeneous endpoints, and rejects uncertainty-based observation
+  admission or online hyperparameter fitting in this controlled study.
+- The raw archive saves paired truth, integration geometry, NaN-padded team
+  state histories, posterior mean/variance/density histories, submitted
+  LOW/HIGH counts, retained counts, and phase timings. It validates that the
+  hidden HIGH field is exactly identical across compositions for each seed.
+- The offline evaluator computes final and trapezoidal time-average HIGH-field
+  NRMSE and normalized-density KL divergence, plus empirical 95% calibration
+  and sample/timing diagnostics. It imports no controllers and never reruns the
+  simulation. The standalone plotter reads only the evaluated archive.
+- Default commands:
+  `.venv/bin/python evaluation/run_multifidelity_composition.py`, then
+  `.venv/bin/python evaluation/evaluate_multifidelity_composition.py`, then
+  `MPLCONFIGDIR=/tmp/ral_marta_mpl .venv/bin/python
+  evaluation/plot_multifidelity_composition.py`.
+- Visual regeneration command used for this milestone:
+  `.venv/bin/python evaluation/run_multifidelity_composition.py --config
+  configs/multifidelity_composition.yaml --output
+  /tmp/multifidelity_composition_milestone_raw.npz --episodes 1 --num-steps 20
+  --no-progress`, followed by the evaluator and
+  `MPLCONFIGDIR=/tmp/mplconfig .venv/bin/python
+  evaluation/plot_multifidelity_composition.py --input
+  /tmp/multifidelity_composition_milestone_evaluated.npz --output
+  docs/assets/team_composition_reconstruction_milestone.png
+  --bootstrap-samples 200`.
+- The visual is a deterministic one-episode validation artifact, not a
+  publication result. Panels A/B show NRMSE and KL histories; panels C/D show
+  final and time-average values against aerial fraction. It was inspected at
+  original resolution: titles, axes, legends, metric directions, composition
+  labels, and markers are readable and unclipped.
+- Deterministic visual-run diagnostics, in A8/G0 through A0/G8 order: final
+  NRMSE was `0.16043514`, `0.13319560`, `0.13192861`, `0.17107781`, and
+  `0.20359170`; final KL was `0.81166223`, `1.13178293`, `1.91858124`,
+  `2.23710402`, and `5.15016917`. Each composition submitted exactly 320 total
+  observations, shifting from all LOW to all HIGH. Final retained totals were
+  235, 236, 237, 235, and 238; these small differences arise from the existing
+  fidelity-specific spatial-separation rules rather than different caps.
+- Tests were added before the implementation. The initial focused run failed
+  during import because the new modules did not exist. After implementation,
+  the dedicated pipeline passed `12/12`; the composition plus estimator,
+  scheduler, and GP selection passed `44/44`. Ruff, Ruff formatting, and Python
+  compilation passed for every new Python file.
+- The full suite completed with `209` passes and four known unrelated failures:
+  the canonical config test still expects 300 rather than the current 200
+  steps; the final-state plot test expects the former orange rather than the
+  current cyan ground trajectory; the ablation/canonical protocol comparison
+  sees the existing 90/360-degree ground-FOV mismatch; and the CLI progress
+  test expects a `posterior_version=` field that the current formatter omits.
+  The first broader selection similarly passed 66 tests and exposed the first
+  three of those failures. None of the failing files or behaviors was changed
+  by this milestone.
+- The mathematical formulation now documents the exact discrete NRMSE, KL,
+  calibration, held-posterior time average, and proportional retention-cap
+  equations. `latexmk -pdf -interaction=nonstopmode -halt-on-error
+  mathematical_formulation.tex` completed successfully in two passes; only
+  pre-existing table underfull/overfull warnings remain.
+- Architecture comparison: the new runner is downstream experiment
+  infrastructure. It constructs the existing `CoupledSimulation`, which still
+  owns one central estimator. No GP, controller, sensor, scheduler, motion,
+  networking, concurrency, or target-architecture behavior changed, and there
+  is no approved-target deviation.
+- Numerical and behavioral regressions: none attributable to this milestone.
+  The smoke numbers above validate data flow only and must not be interpreted
+  as evidence that a particular composition is optimal. The next discrepancy
+  ablation remains useful, but its mixed composition will be selected and
+  documented later rather than assumed to be A4/G4.
+
+## Baseline-comparison metric output-plot milestone
+
+- Files changed: `evaluation/plot_baseline_comparison_metrics.py`,
+  `evaluation/evaluate_baseline_comparison.py`,
+  `tests/test_plot_baseline_comparison_metrics.py`,
+  `examples/plot_baseline_comparison_output_milestone.py`,
+  `docs/assets/baseline_comparison_output_plot_milestone.png`,
+  `docs/architecture/implementation_baseline_comparison_runner.md`,
+  `.gitignore`, and this status file.
+- Running `PYTHONPATH=. .venv/bin/python
+  evaluation/evaluate_baseline_comparison.py` now writes both
+  `output/baseline_comparison/evaluated.npz` and
+  `output/baseline_comparison/coverage_metrics.png`. The image is at the common
+  comparison root beside the `multifidelity/` and `egerstedt/` directories that
+  contain the separate trajectory plots.
+- `--plot-output PATH` selects another PNG destination and `--no-plot` retains
+  archive-only evaluation. An existing archive can be plotted without
+  recomputation using `PYTHONPATH=. .venv/bin/python
+  evaluation/plot_baseline_comparison_metrics.py`.
+- Panel A shows mean footprint-normalized coverage histories and labels the
+  higher-is-better direction. Panel B shows raw visible hidden-truth mass with
+  each method's equal-area oracle. Panel C places every episode by its
+  time-average and final coverage, with a diamond for the mean. Panel D shows
+  complete method-step runtime distributions and labels lower as better. For
+  repeated episodes, the history plots add the episode 2.5--97.5 percentile
+  envelope.
+- Visual regeneration command: `MPLCONFIGDIR=/tmp/ral_marta_mpl PYTHONPATH=.
+  .venv/bin/python
+  examples/plot_baseline_comparison_output_milestone.py`. It uses one real,
+  fixed-seed, eight-step paired smoke run. The resulting image was visually
+  inspected at original resolution: all four panels, legends, method labels,
+  direction annotations, axes, and oracle lines are readable and unclipped.
+  Coverage histories are deterministic for the fixed inputs; the honest
+  wall-clock runtime panel can vary with machine load.
+- Deterministic coverage results for scenario fingerprint
+  `6849ca260e9c11200963c37267a9faced3222f280c7713d3175a82f569f1729c`:
+  proposed final/time-average coverage was
+  `0.150183157774`/`0.243146327962`, and Egerstedt final/time-average coverage
+  was `0.470002753942`/`0.451425010575`.
+- Architecture comparison: only the existing offline evaluation branch gained
+  an archive-to-figure node. The approved central-estimator architecture is
+  unchanged and there is no target deviation.
+- Commands executed: the focused plot/evaluator tests; the combined comparison
+  runner, evaluator, trajectory-plot, metric-plot, and ablation regression
+  selection; changed-file Ruff; Python compilation; `git diff --check`; the
+  full Pytest suite; and the fixed-seed visual regeneration command.
+- Validation results: the focused plotting/evaluator selection passed `7/7`.
+  The broader comparison/ablation selection passed `24` tests with one known
+  unrelated configuration-consistency failure. The full suite passed `197`
+  tests and retained four unrelated failures: stale expectations of `300`
+  rather than `200` canonical steps, the former orange ground-trajectory
+  color, missing `posterior_version=` progress text, and the dirty-tree
+  protocol mismatch between canonical ground FOV `360` and ablation FOV `90`.
+  Ruff, compilation, and diff checks passed.
+- Mathematical documentation: no equations or metric definitions changed, so
+  `docs/mathematical_formulation.md` and its LaTeX source remain current.
+- Numerical and behavioral regressions: none. Plotting reads saved arrays only;
+  it does not alter the evaluated values, estimator, controllers, trajectories,
+  or baseline dynamics.
+
+## Paired baseline-comparison metric evaluator milestone
+
+- Files changed: `evaluation/comparison_io.py`,
+  `evaluation/evaluate_baseline_comparison.py`,
+  `tests/test_evaluate_baseline_comparison.py`,
+  `examples/plot_baseline_comparison_metrics_milestone.py`,
+  `docs/assets/baseline_comparison_metrics_milestone.png`,
+  `docs/architecture/implementation_baseline_comparison_runner.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`, and this status file.
+- The evaluator verifies both recorded and recomputed scenario fingerprints and
+  exact paired seeds, times, query points, weights, truth densities, and free
+  masks before computing a metric. It never reruns or imports either
+  controller.
+- For each saved state it computes raw hidden-truth probability mass in the
+  union of the actual ground footprints and the existing footprint-normalized
+  coverage effectiveness. The proposed method uses saved headings and its
+  configured sector; the Egerstedt point-robot baseline uses its declared
+  omnidirectional disk. Each method receives a separate equal-area oracle so a
+  larger footprint is not silently assigned the same denominator.
+- The evaluated archive stores complete coverage series, equal-area oracle
+  mass, area budgets, final and trapezoidal time-average coverage, raw total
+  step runtimes, and per-episode mean/median/p95/maximum runtime. Its metadata
+  records `coverage: true` and `runtime: true` under `comparable_metrics`, while
+  KL, NRMSE, and calibration remain false because the baseline publishes no
+  posterior.
+- Default evaluation command after generating both raw archives:
+  `PYTHONPATH=. .venv/bin/python
+  evaluation/evaluate_baseline_comparison.py`. The default output is
+  `output/baseline_comparison/evaluated.npz`. The later output-plot milestone
+  also makes this command write `output/baseline_comparison/coverage_metrics.png`.
+- Visual regeneration command: `MPLCONFIGDIR=/tmp/ral_marta_mpl PYTHONPATH=.
+  .venv/bin/python
+  examples/plot_baseline_comparison_metrics_milestone.py`. The left panel shows
+  the common footprint-normalized coverage series. The right panel shows raw
+  visible hidden-truth mass against each method's fixed equal-area oracle.
+  Both panels use one real, fixed-seed, eight-step paired run.
+- Deterministic visual results for scenario fingerprint
+  `6849ca260e9c11200963c37267a9faced3222f280c7713d3175a82f569f1729c`:
+  proposed final/time-average coverage was
+  `0.150183157774`/`0.243146327962` with oracle mass `0.217767014364`;
+  Egerstedt final/time-average coverage was
+  `0.470002753942`/`0.451425010575` with oracle mass `0.605807901228`.
+  The figure was visually inspected at original resolution; titles, legends,
+  axes, endpoints, oracle lines, and scales are readable without clipping.
+- Commands executed: changed-file Ruff, Python compilation, `git diff --check`,
+  focused evaluator tests, comparison/ablation regression tests, the full
+  Pytest suite, the visual regeneration command, and a two-pass `latexmk -pdf
+  -interaction=nonstopmode -halt-on-error mathematical_formulation.tex` build.
+- Validation results: the new evaluator tests passed `3/3`; the combined
+  evaluator/comparison/ablation selection passed `21` tests with one unrelated
+  configuration-consistency failure; the final full suite passed `195` tests with
+  four unrelated failures. Those failures are stale expectations of `300`
+  rather than `200` canonical steps, the former orange ground-trajectory
+  color, missing `posterior_version=` progress text, and a dirty-tree protocol
+  mismatch between canonical ground FOV `360` and ablation FOV `90`. The LaTeX
+  build passed with only existing table line-width warnings.
+- Numerical and behavioral regressions: none in production or baseline code.
+  The evaluated numbers describe the current saved trajectories, including the
+  previously identified range-clipped aerial-cell behavior in the Egerstedt
+  implementation; this milestone evaluates that behavior but does not claim
+  to correct or validate its paper fidelity.
 
 ## Completed Work
 

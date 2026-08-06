@@ -35,6 +35,8 @@ prompts/
 !docs/assets/coverage_metric_milestone.png
 !docs/assets/multifidelity_comparison_runner_milestone.png
 !docs/assets/egerstedt_comparison_runner_milestone.png
+!docs/assets/baseline_comparison_metrics_milestone.png
+!docs/assets/baseline_comparison_output_plot_milestone.png
 !docs/assets/comparison_trajectory_milestone/
 !docs/assets/comparison_trajectory_milestone/**
 !docs/architecture/
