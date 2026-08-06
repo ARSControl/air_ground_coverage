@@ -491,11 +491,14 @@ def build_multifidelity_coordinator(
     mask: ArrayLike | None = None,
     *,
     seed: int | None = None,
+    field_mask: ArrayLike | None = None,
 ) -> MultifidelitySimulationCoordinator:
     """Map reviewed configuration into one multi-fidelity coordinator."""
     rho = float(_get(params, "multifidelity.rho", 0.8))
     raw_high = np.asarray(high_field, dtype=float)
-    field_mask = _compatible_boolean_mask(mask, raw_high.shape)
+    resolved_field_mask = _compatible_boolean_mask(
+        mask if field_mask is None else field_mask, raw_high.shape
+    )
     fields = build_fidelity_fields(
         raw_high,
         rho,
@@ -506,7 +509,7 @@ def build_multifidelity_coordinator(
                 2.0,
             )
         ),
-        field_mask,
+        resolved_field_mask,
     )
     query_array = np.asarray(query_points, dtype=float)
     query_mask = _compatible_boolean_mask(mask, (query_array.shape[0],))

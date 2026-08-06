@@ -68,7 +68,12 @@ def plot_ablation_evaluation(
     rng = np.random.default_rng(20260802)
     posterior_panels = (
         (axes[0, 0], "kl", "KL divergence", "lower is better"),
-        (axes[0, 1], "nrmse", "NRMSE of latent HIGH field", "lower is better"),
+        (
+            axes[0, 1],
+            "nrmse",
+            "NRMSE of zero-clipped HIGH reconstruction",
+            "lower is better",
+        ),
         (
             axes[1, 0],
             "calibration_95",

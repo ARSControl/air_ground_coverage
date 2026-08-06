@@ -188,7 +188,7 @@ def run_ablation_simulations(
             if initial_snapshot is not None:
                 raise RuntimeError("new simulations must begin without a posterior")
             high_grid = np.asarray(simulation.coordinator.fields.high, dtype=float)
-            map_grid = np.asarray(simulation.hedac.map, dtype=np.int8)
+            map_grid = np.asarray(simulation.ground_map, dtype=np.int8)
             truth_field = _resample_grid(high_grid, query)
             free_mask = _resample_grid(map_grid == 0, query, nearest=True).astype(bool)
             truth_density = normalized_density(

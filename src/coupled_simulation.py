@@ -17,6 +17,7 @@ from .core.GaussianProcess import GaussianProcess
 from .core.base import HEDACParams, MapLoader
 from .core.gmm import GMM
 from .core.hedac import HEDACAlgorithm
+from .core.obstacles import generate_circular_obstacle_map
 from .models import models
 from .models.agents import (
     AgentTeam,
@@ -109,6 +110,9 @@ class CoupledSimulation:
         ground_team: AgentTeam,
         ground_controller: GroundController,
         coordinator: MultifidelitySimulationCoordinator | None = None,
+        ground_map: np.ndarray | None = None,
+        ground_obstacle_centers: np.ndarray | None = None,
+        ground_obstacle_radius: float = 0.0,
     ) -> None:
         if not isinstance(mode, EstimatorMode):
             raise TypeError("mode must be an EstimatorMode")
@@ -123,6 +127,26 @@ class CoupledSimulation:
         self.ground_team = ground_team
         self.ground_controller = ground_controller
         self.coordinator = coordinator
+        selected_ground_map = self.hedac.map if ground_map is None else ground_map
+        validated_ground_map = np.asarray(selected_ground_map, dtype=np.int32)
+        if validated_ground_map.shape != self.hedac.map.shape:
+            raise ValueError("ground_map must have the aerial map shape")
+        if not np.all(np.isin(validated_ground_map, (0, 1))):
+            raise ValueError("ground_map must be binary")
+        self.ground_map = np.array(validated_ground_map, copy=True)
+        self.ground_map.setflags(write=False)
+        centers = (
+            np.empty((0, 2), dtype=float)
+            if ground_obstacle_centers is None
+            else np.asarray(ground_obstacle_centers, dtype=float)
+        )
+        if centers.ndim != 2 or centers.shape[1] != 2:
+            raise ValueError("ground_obstacle_centers must have shape (N, 2)")
+        self.ground_obstacle_centers = np.array(centers, copy=True)
+        self.ground_obstacle_centers.setflags(write=False)
+        self.ground_obstacle_radius = _nonnegative_float(
+            ground_obstacle_radius, "ground_obstacle_radius"
+        )
         self._step_results: list[CoupledStepResult] = []
         self._estimator_reports: list[CoordinatorEventReport] = []
 
@@ -275,23 +299,46 @@ def build_coupled_simulation(
     np.random.seed(seed)
     map_loader = _build_map_loader(aerial_params)
     map_array = map_loader.load()
-    goal_density = _build_goal_density(aerial_params, map_loader)
-    aerial_team = _build_team(aerial_params, map_array, map_loader.get_free_cells())
+    generated_obstacles = generate_circular_obstacle_map(
+        map_array.shape,
+        count=ground_params.num_obstacles,
+        radius=ground_params.obstacles_radius,
+        # Robot positions and controller grids use raster-index coordinates,
+        # independently of the heat equation's physical cell-size parameter.
+        resolution=1.0,
+        seed=seed + 30_000,
+    )
+    ground_map = np.maximum(map_array, generated_obstacles.occupancy).astype(np.int32)
+    goal_density = _build_goal_density(
+        aerial_params, map_loader, free_mask=ground_map == 0
+    )
+    aerial_team = _build_team(
+        aerial_params,
+        map_array,
+        map_loader.get_free_cells(),
+        initialization_seed=seed + 40_000,
+    )
     hedac = HEDACAlgorithm(aerial_params, map_loader, goal_density)
 
     ground_params.dt = aerial_params.dt
-    ground_team = _build_team(ground_params, map_array, None)
+    ground_free_cells = np.argwhere(ground_map == 0)
+    ground_team = _build_team(
+        ground_params,
+        ground_map,
+        ground_free_cells,
+        initialization_seed=seed + 50_000,
+    )
     ground_controller: GroundController
     controller_type = _ground_controller_type(ground_params)
     if len(ground_team) == 0:
         query_points, query_shape, integration_weights = _structured_query_grid(
-            map_array.shape,
+            ground_map.shape,
             max(2, int(ground_params.local_grid_points)),
         )
         ground_controller = _NoOpGroundController(query_points, integration_weights)
     elif controller_type == "mpc":
         legacy_ground = _LegacyGroundMPC(
-            ground_params, map_array, ground_team, goal_density
+            ground_params, ground_map, ground_team, goal_density
         )
         ground_controller = legacy_ground
         query_points = legacy_ground.query_points
@@ -299,7 +346,7 @@ def build_coupled_simulation(
         integration_weights = legacy_ground.integration_weights
     else:
         lloyd_ground = _GroundLloydController(
-            ground_params, map_array, ground_team, goal_density
+            ground_params, ground_map, ground_team, goal_density
         )
         ground_controller = lloyd_ground
         query_points = lloyd_ground.query_points
@@ -315,8 +362,9 @@ def build_coupled_simulation(
             query_points,
             query_shape,
             integration_weights,
-            mask=None,
+            mask=_query_free_mask(ground_map, query_points),
             seed=seed,
+            field_mask=ground_map == 0,
         )
     return CoupledSimulation(
         mode=mode,
@@ -326,6 +374,9 @@ def build_coupled_simulation(
         ground_team=ground_team,
         ground_controller=ground_controller,
         coordinator=coordinator,
+        ground_map=ground_map,
+        ground_obstacle_centers=generated_obstacles.centers,
+        ground_obstacle_radius=generated_obstacles.radius,
     )
 
 
@@ -496,7 +547,12 @@ class _LegacyGroundMPC:
             controls = solution["x"].full().reshape(-1, 2)
             self._u_previous[index] = solution["x"].full().ravel()
             velocity, angular_velocity = controls[0]
-            agent.step(velocity, angular_velocity)
+            if isinstance(agent, UnicycleAgent):
+                _step_unicycle_with_map_guard(
+                    agent, velocity, angular_velocity, self.map_array
+                )
+            else:
+                agent.step(velocity, angular_velocity)
 
 
 class _GroundLloydController:
@@ -536,6 +592,17 @@ class _GroundLloydController:
         self.max_angular_velocity = _positive_float(
             params.get("lloyd.max_angular_velocity", params.max_dtheta),
             "ground.lloyd.max_angular_velocity",
+        )
+        self.wall_avoidance_weight = _nonnegative_float(
+            params.get("agents.wall_avoidance_weight", 1.0),
+            "ground.agents.wall_avoidance_weight",
+        )
+        self.obstacle_influence_radius = max(
+            2.0,
+            2.5
+            * _nonnegative_float(
+                params.obstacles_radius, "ground.simulation.obstacles_radius"
+            ),
         )
         self.last_density = np.zeros(self.query_points.shape[0], dtype=float)
         self.last_centroids = np.empty((len(team), 2), dtype=float)
@@ -587,6 +654,14 @@ class _GroundLloydController:
         controls = np.zeros((len(self.team), 2), dtype=float)
         for index, (agent, centroid) in enumerate(zip(self.team.agents, centroids)):
             displacement = centroid - agent.position
+            displacement = displacement + self.wall_avoidance_weight * (
+                _obstacle_repulsion(
+                    self.map_array,
+                    agent.position,
+                    self.obstacle_influence_radius,
+                )
+                * max(float(np.linalg.norm(displacement)), 1.0)
+            )
             distance = float(np.linalg.norm(displacement))
             if distance <= self.centroid_tolerance:
                 velocity = 0.0
@@ -616,8 +691,14 @@ class _GroundLloydController:
         self.last_masses = masses
         self.last_controls = controls
         self._density_source = density_source
-        for agent, (velocity, angular_velocity) in zip(self.team.agents, controls):
-            agent.step(velocity, angular_velocity)
+        for index, (agent, (velocity, angular_velocity)) in enumerate(
+            zip(self.team.agents, controls)
+        ):
+            executed_velocity = _step_unicycle_with_map_guard(
+                agent, velocity, angular_velocity, self.map_array
+            )
+            controls[index, 0] = executed_velocity
+        self.last_controls = controls
 
 
 def compute_weighted_voronoi_centroids(
@@ -691,7 +772,12 @@ def _build_map_loader(params: HEDACParams) -> MapLoader:
     return MapLoader(size=size, resolution=params.resolution)
 
 
-def _build_goal_density(params: HEDACParams, map_loader: MapLoader) -> np.ndarray:
+def _build_goal_density(
+    params: HEDACParams,
+    map_loader: MapLoader,
+    *,
+    free_mask: np.ndarray | None = None,
+) -> np.ndarray:
     map_array = map_loader.load()
     height, width = map_array.shape
     number_of_peaks = int(params.get("goal_density.num_peaks", 3))
@@ -719,7 +805,13 @@ def _build_goal_density(params: HEDACParams, map_loader: MapLoader) -> np.ndarra
     grid_x, grid_y = np.meshgrid(np.arange(width), np.arange(height))
     query = np.column_stack((grid_x.ravel(), grid_y.ravel()))
     density = mixture.sample_pdf(query).reshape(map_array.shape)
-    density = min_max_normalize(density) * (map_array == 0)
+    density_mask = map_array == 0
+    if free_mask is not None:
+        candidate_mask = np.asarray(free_mask, dtype=bool)
+        if candidate_mask.shape != map_array.shape:
+            raise ValueError("free_mask must have the map shape")
+        density_mask &= candidate_mask
+    density = min_max_normalize(density) * density_mask
     return density
 
 
@@ -727,21 +819,47 @@ def _build_team(
     params: HEDACParams,
     map_array: np.ndarray,
     free_cells: np.ndarray | None,
+    *,
+    initialization_seed: int | None = None,
 ) -> AgentTeam:
     count = int(params.num_agents)
     height, width = map_array.shape
     if count == 0:
         return AgentTeam([])
-    if free_cells is not None and len(free_cells) >= count:
-        indices = np.random.choice(len(free_cells), count, replace=False)
-        positions = free_cells[indices][:, [1, 0]].astype(float)
+    policy = params.get("initialization.position_policy", "uniform")
+    if not isinstance(policy, str):
+        raise TypeError("initialization.position_policy must be a string")
+    policy = policy.strip().lower()
+    initialization_rng: np.random.Generator | None = None
+    if policy == "corner":
+        if initialization_seed is None:
+            raise ValueError("corner initialization requires an initialization seed")
+        candidates = _corner_initialization_cells(params, map_array, free_cells)
+        if len(candidates) < count:
+            raise ValueError(
+                "corner initialization region does not contain enough free cells "
+                f"for {count} robots"
+            )
+        initialization_rng = np.random.default_rng(initialization_seed)
+        indices = initialization_rng.permutation(len(candidates))[:count]
+        positions = candidates[indices][:, [1, 0]].astype(float)
+    elif policy == "uniform":
+        if free_cells is not None and len(free_cells) >= count:
+            indices = np.random.choice(len(free_cells), count, replace=False)
+            positions = free_cells[indices][:, [1, 0]].astype(float)
+        else:
+            positions = np.random.rand(count, 2) * np.array([width, height])
     else:
-        positions = np.random.rand(count, 2) * np.array([width, height])
+        raise ValueError("initialization.position_policy must be 'uniform' or 'corner'")
     agents = []
     model_type = params.get("agents.model_type", "double_integrator")
     observation_count = int(params.get("gpr.obs_per_step", 10))
     for index, position in enumerate(positions):
-        heading = float(np.random.uniform(0.0, 2.0 * np.pi))
+        heading = float(
+            np.random.uniform(0.0, 2.0 * np.pi)
+            if initialization_rng is None
+            else initialization_rng.uniform(0.0, 2.0 * np.pi)
+        )
         common = {
             "x0": position,
             "theta0": heading,
@@ -777,6 +895,50 @@ def _build_team(
     return AgentTeam(agents)
 
 
+def _corner_initialization_cells(
+    params: HEDACParams,
+    map_array: np.ndarray,
+    free_cells: np.ndarray | None,
+) -> np.ndarray:
+    """Return free raster cells inside the configured corner rectangle."""
+    corner = params.get("initialization.corner", "lower_left")
+    if not isinstance(corner, str):
+        raise TypeError("initialization.corner must be a string")
+    corner = corner.strip().lower()
+    valid_corners = {"lower_left", "lower_right", "upper_left", "upper_right"}
+    if corner not in valid_corners:
+        raise ValueError(
+            "initialization.corner must be one of "
+            "lower_left, lower_right, upper_left, or upper_right"
+        )
+    fraction = params.get("initialization.corner_fraction", 0.2)
+    if isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
+        raise TypeError("initialization.corner_fraction must be a real number")
+    fraction = float(fraction)
+    if not np.isfinite(fraction) or not 0.0 < fraction <= 1.0:
+        raise ValueError("initialization.corner_fraction must be in (0, 1]")
+
+    height, width = map_array.shape
+    if free_cells is None:
+        free_cells = np.argwhere(np.asarray(map_array) == 0)
+    cells = np.asarray(free_cells)
+    if cells.ndim != 2 or cells.shape[1] != 2:
+        raise ValueError("free_cells must have shape (N, 2)")
+    y_values = cells[:, 0]
+    x_values = cells[:, 1]
+    horizontal = (
+        x_values < fraction * width
+        if corner.endswith("left")
+        else x_values >= (1.0 - fraction) * width
+    )
+    vertical = (
+        y_values < fraction * height
+        if corner.startswith("lower")
+        else y_values >= (1.0 - fraction) * height
+    )
+    return cells[horizontal & vertical]
+
+
 def _structured_query_grid(
     map_shape: tuple[int, int], points_per_axis: int
 ) -> tuple[np.ndarray, tuple[int, int], np.ndarray]:
@@ -793,6 +955,87 @@ def _structured_query_grid(
     y_weights[[0, -1]] *= 0.5
     weights = np.outer(y_weights, x_weights).ravel()
     return query, grid_x.shape, weights
+
+
+def _query_free_mask(map_array: np.ndarray, query_points: np.ndarray) -> np.ndarray:
+    """Sample a binary occupancy map at arbitrary estimator query points."""
+    occupancy = np.asarray(map_array)
+    points = np.asarray(query_points, dtype=float)
+    if occupancy.ndim != 2:
+        raise ValueError("map_array must be two-dimensional")
+    if points.ndim != 2 or points.shape[1] != 2:
+        raise ValueError("query_points must have shape (N, 2)")
+    x_indices = np.clip(np.rint(points[:, 0]).astype(int), 0, occupancy.shape[1] - 1)
+    y_indices = np.clip(np.rint(points[:, 1]).astype(int), 0, occupancy.shape[0] - 1)
+    return occupancy[y_indices, x_indices] == 0
+
+
+def _obstacle_repulsion(
+    map_array: np.ndarray,
+    position: np.ndarray,
+    influence_radius: float,
+) -> np.ndarray:
+    """Return a bounded direction away from nearby occupied cell centres."""
+    occupied_y, occupied_x = np.nonzero(np.asarray(map_array))
+    if occupied_x.size == 0:
+        return np.zeros(2, dtype=float)
+    occupied = np.column_stack((occupied_x, occupied_y)).astype(float)
+    offsets = np.asarray(position, dtype=float) - occupied
+    distances = np.linalg.norm(offsets, axis=1)
+    nearby = (distances > 1.0e-12) & (distances < influence_radius)
+    if not np.any(nearby):
+        return np.zeros(2, dtype=float)
+    directions = offsets[nearby] / distances[nearby, np.newaxis]
+    strengths = (influence_radius - distances[nearby]) / influence_radius
+    vector = np.sum(directions * strengths[:, np.newaxis], axis=0)
+    norm = float(np.linalg.norm(vector))
+    return vector if norm <= 1.0 else vector / norm
+
+
+def _step_unicycle_with_map_guard(
+    agent: UnicycleAgent,
+    velocity: float,
+    angular_velocity: float,
+    map_array: np.ndarray,
+) -> float:
+    """Apply a unicycle command, suppressing translation through obstacles."""
+    occupancy = np.asarray(map_array)
+    if not np.any(occupancy):
+        agent.step(velocity, angular_velocity)
+        return float(np.clip(velocity, -agent.max_v, agent.max_v))
+    clipped_velocity = float(np.clip(velocity, -agent.max_v, agent.max_v))
+    clipped_omega = float(np.clip(angular_velocity, -agent.max_omega, agent.max_omega))
+    next_heading = _wrap_angle(agent.theta + clipped_omega * agent.dt)
+    proposed = agent.position + clipped_velocity * agent.dt * np.array(
+        [math.cos(next_heading), math.sin(next_heading)]
+    )
+    executed_velocity = (
+        clipped_velocity
+        if _segment_is_free(occupancy, agent.position, proposed)
+        else 0.0
+    )
+    agent.step(executed_velocity, clipped_omega)
+    return executed_velocity
+
+
+def _segment_is_free(map_array: np.ndarray, start: np.ndarray, end: np.ndarray) -> bool:
+    """Conservatively sample a motion segment against a binary occupancy grid."""
+    occupancy = np.asarray(map_array)
+    height, width = occupancy.shape
+    displacement = np.asarray(end, dtype=float) - np.asarray(start, dtype=float)
+    sample_count = max(2, int(math.ceil(np.linalg.norm(displacement) / 0.25)) + 1)
+    samples = (
+        np.asarray(start, dtype=float)[np.newaxis, :]
+        + np.linspace(0.0, 1.0, sample_count)[:, np.newaxis]
+        * displacement[np.newaxis, :]
+    )
+    if np.any(samples[:, 0] < 0.0) or np.any(samples[:, 0] > width - 1):
+        return False
+    if np.any(samples[:, 1] < 0.0) or np.any(samples[:, 1] > height - 1):
+        return False
+    x_indices = np.rint(samples[:, 0]).astype(int)
+    y_indices = np.rint(samples[:, 1]).astype(int)
+    return bool(np.all(occupancy[y_indices, x_indices] == 0))
 
 
 def _trajectories(team: AgentTeam) -> tuple[FloatArray, ...]:

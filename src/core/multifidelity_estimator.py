@@ -454,8 +454,26 @@ class CentralAsynchronousEstimator:
 
             prediction_start = perf_counter()
             prediction = candidate_gp.predict_high(self.settings.query_points)
+            nonnegative_mean = positive_part(prediction.mean)
+            included = (
+                np.ones(nonnegative_mean.shape, dtype=bool)
+                if self.settings.mask is None
+                else self.settings.mask
+            )
+            weighted_mass = float(
+                np.sum(
+                    np.where(included, nonnegative_mean, 0.0)
+                    * self.settings.integration_weights,
+                    dtype=float,
+                )
+            )
+            density_values = (
+                np.ones(nonnegative_mean.shape, dtype=float)
+                if weighted_mass <= 0.0
+                else nonnegative_mean
+            )
             density = normalize_nonnegative_density(
-                positive_part(prediction.mean),
+                density_values,
                 self.settings.integration_weights,
                 mask=self.settings.mask,
                 tolerance=self.settings.normalization_tolerance,

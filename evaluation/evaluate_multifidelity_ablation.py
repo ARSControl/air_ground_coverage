@@ -226,8 +226,12 @@ def evaluate_ablation_archive(
         "timing_statistics": ["median", "p95", "maximum"],
         "metric_definitions": {
             "kl": "weighted D_KL(truth_density || posterior_density)",
-            "nrmse": "free-space RMSE(high_mean, high_truth) / range(high_truth)",
-            "calibration_95": "free-space fraction of truth inside mean +/- 1.96 std",
+            "nrmse": (
+                "free-space RMSE(max(high_mean, 0), high_truth) / range(high_truth)"
+            ),
+            "calibration_95": (
+                "free-space fraction of truth inside raw GP mean +/- 1.96 std"
+            ),
             "covered_probability_mass": (
                 "truth mass inside the union of actual ground FOV sectors"
             ),

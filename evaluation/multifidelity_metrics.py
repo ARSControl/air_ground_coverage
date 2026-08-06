@@ -11,6 +11,11 @@ from numpy.typing import ArrayLike, NDArray
 FloatArray = NDArray[np.float64]
 
 
+def clipped_reconstruction(posterior_mean: ArrayLike) -> FloatArray:
+    """Return the nonnegative field reconstruction ``max(mean, 0)``."""
+    return np.maximum(_vector(posterior_mean, "posterior_mean"), 0.0)
+
+
 def normalized_density(values: ArrayLike, integration_weights: ArrayLike) -> FloatArray:
     field = _vector(values, "values")
     weights = _weights(integration_weights, field.size)
@@ -49,7 +54,7 @@ def kl_divergence(
 
 def nrmse(truth_field: ArrayLike, posterior_mean: ArrayLike) -> float:
     truth = _vector(truth_field, "truth_field")
-    mean = _vector(posterior_mean, "posterior_mean")
+    mean = clipped_reconstruction(posterior_mean)
     if mean.shape != truth.shape:
         raise ValueError("posterior_mean must match truth_field")
     span = float(np.max(truth) - np.min(truth))
@@ -57,6 +62,37 @@ def nrmse(truth_field: ArrayLike, posterior_mean: ArrayLike) -> float:
         raise ValueError("NRMSE requires a nonconstant truth field")
     rmse = float(np.sqrt(np.mean((mean - truth) ** 2, dtype=float)))
     return rmse / span
+
+
+def negative_log_predictive_density(
+    truth_field: ArrayLike,
+    posterior_mean: ArrayLike,
+    posterior_variance: ArrayLike,
+    integration_weights: ArrayLike,
+    *,
+    variance_floor: float = 1.0e-12,
+) -> float:
+    """Return weighted marginal Gaussian NLPD for the latent HIGH field."""
+    truth = _vector(truth_field, "truth_field")
+    mean = _vector(posterior_mean, "posterior_mean")
+    variance = _vector(posterior_variance, "posterior_variance")
+    if mean.shape != truth.shape or variance.shape != truth.shape:
+        raise ValueError("posterior vectors must match truth_field")
+    if np.any(variance < 0.0):
+        raise ValueError("posterior_variance must be nonnegative")
+    weights = _weights(integration_weights, truth.size)
+    floor = _positive_float(variance_floor, "variance_floor")
+    safe_variance = np.maximum(variance, floor)
+    pointwise = 0.5 * np.log(2.0 * np.pi * safe_variance) + 0.5 * (
+        (truth - mean) ** 2 / safe_variance
+    )
+    value = float(
+        np.sum(weights * pointwise, dtype=float)
+        / np.sum(weights, dtype=float)
+    )
+    if not math.isfinite(value):
+        raise FloatingPointError("NLPD produced a nonfinite value")
+    return value
 
 
 def calibration_95(

@@ -109,17 +109,31 @@ def test_low_only_update_publishes_normalized_finite_posterior() -> None:
     assert np.all(np.isfinite(snapshot.high_variance))
     assert np.all(snapshot.high_variance >= 0.0)
     assert np.all(snapshot.density >= 0.0)
-    assert np.sum(snapshot.density * snapshot.integration_weights) == pytest.approx(
-        1.0
-    )
+    assert np.sum(snapshot.density * snapshot.integration_weights) == pytest.approx(1.0)
     expected_density = np.maximum(snapshot.high_mean, 0.0)
-    expected_density /= np.sum(
-        expected_density * snapshot.integration_weights
-    )
+    expected_density /= np.sum(expected_density * snapshot.integration_weights)
     np.testing.assert_array_equal(snapshot.density, expected_density)
     assert snapshot.fit_duration >= 0.0
     assert snapshot.prediction_duration >= 0.0
     assert estimator.pending_count == 0
+
+
+def test_nonpositive_posterior_mean_publishes_uniform_free_space_density() -> None:
+    estimator = CentralAsynchronousEstimator(make_settings())
+    estimator.submit_many(
+        item(float(index), float(position), Fidelity.LOW, -1.0)
+        for index, position in enumerate(np.linspace(-2.5, 2.5, 11))
+    )
+
+    report = estimator.update(10.0)
+    snapshot = estimator.latest_posterior
+
+    assert report.status is UpdateStatus.UPDATED
+    assert snapshot is not None
+    assert np.all(snapshot.high_mean < 0.0)
+    expected = np.ones(snapshot.density.shape)
+    expected /= np.sum(expected * snapshot.integration_weights)
+    np.testing.assert_allclose(snapshot.density, expected)
 
 
 def test_high_data_arriving_later_changes_posterior_and_version() -> None:
@@ -326,9 +340,7 @@ def test_fixed_seed_inputs_produce_deterministic_snapshot_values() -> None:
         np.testing.assert_array_equal(first_array, second_array)
 
 
-def _optimization_settings(
-    *, interval: int = 1
-) -> HyperparameterOptimizationSettings:
+def _optimization_settings(*, interval: int = 1) -> HyperparameterOptimizationSettings:
     return HyperparameterOptimizationSettings(
         enabled=True,
         fit_interval_updates=interval,
@@ -365,8 +377,7 @@ def test_scheduled_hyperparameter_fit_is_recorded_in_snapshot() -> None:
     assert not second.hyperparameter_fit_performed
     assert second.low_kernel_length_scale == first.low_kernel_length_scale
     assert (
-        second.discrepancy_kernel_length_scale
-        == first.discrepancy_kernel_length_scale
+        second.discrepancy_kernel_length_scale == first.discrepancy_kernel_length_scale
     )
 
 
@@ -385,9 +396,7 @@ def test_failed_hyperparameter_fit_preserves_previous_transaction(
     def fail_fit(*args, **kwargs):
         raise RuntimeError("injected hyperparameter failure")
 
-    monkeypatch.setattr(
-        MultiFidelityGaussianProcess, "fit_hyperparameters", fail_fit
-    )
+    monkeypatch.setattr(MultiFidelityGaussianProcess, "fit_hyperparameters", fail_fit)
     report = estimator.update(11.0)
     assert report.status is UpdateStatus.FAILED
     assert report.exception_type == "RuntimeError"
