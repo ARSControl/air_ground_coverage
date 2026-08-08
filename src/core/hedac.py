@@ -45,6 +45,7 @@ class HEDACAlgorithm:
         self.height = self.map.shape[1]
         self.goal_density = goal_density
         self.current_goal_density = self.goal_density.copy()
+        self.control_mode = "centralized"
 
         # Update params with actual map dimensions
         params.update_from_map(self.map.shape)
@@ -120,7 +121,12 @@ class HEDACAlgorithm:
         # Normalize
         self.heat_field = normalize_to_pdf(self.heat_field, self.map)
 
-    def update_coverage(self, agent: AgentLike):
+    def update_coverage(
+        self,
+        agent: AgentLike,
+        *,
+        coverage_density: np.ndarray | None = None,
+    ):
         """
         Update coverage density from agent position.
 
@@ -133,9 +139,13 @@ class HEDACAlgorithm:
         x_slice, x_start, x_num = clamp_kernel_1d(x, 0, self.width, self.kernel_size)
         y_slice, y_start, y_num = clamp_kernel_1d(y, 0, self.height, self.kernel_size)
 
+        target = self.coverage_density if coverage_density is None else coverage_density
+        if target.shape != self.map.shape:
+            raise ValueError("coverage_density must have the HEDAC map shape")
+
         # Add coverage
         # numpy arrays are indexed as [row, col] = [y, x]
-        self.coverage_density[y_slice, x_slice] += self.coverage_block[
+        target[y_slice, x_slice] += self.coverage_block[
             y_start : y_start + y_num, x_start : x_start + x_num
         ]
 
@@ -144,7 +154,12 @@ class HEDACAlgorithm:
         #     y_start : y_start + y_num, x_start : x_start + x_num
         # ]
 
-    def compute_source_term(self) -> np.ndarray:
+    def compute_source_term(
+        self,
+        *,
+        coverage_density: np.ndarray | None = None,
+        goal_density: np.ndarray | None = None,
+    ) -> np.ndarray:
         """
         Compute source term for heat equation.
 
@@ -152,12 +167,17 @@ class HEDACAlgorithm:
             Source term field
         """
         # Normalize coverage and goal density
-        coverage_norm = normalize_to_pdf(self.coverage_density, self.map)
-        goal_norm = (
-            self.current_goal_density
-            if self.current_goal_density is not None
-            else self.goal_density
+        coverage = (
+            self.coverage_density
+            if coverage_density is None
+            else np.asarray(coverage_density, dtype=float)
         )
+        if coverage.shape != self.map.shape:
+            raise ValueError("coverage_density must have the HEDAC map shape")
+        coverage_norm = normalize_to_pdf(coverage, self.map)
+        goal_norm = self.current_goal_density if goal_density is None else goal_density
+        if goal_norm is None:
+            goal_norm = self.goal_density
 
         # Difference between goal and coverages
         diff = goal_norm - coverage_norm
@@ -174,38 +194,27 @@ class HEDACAlgorithm:
 
         return source
 
-    def update_heat_field(self):
-        """Update heat field using heat equation."""
-        source = self.compute_source_term()
+    def _advance_heat_field(
+        self, heat_field: np.ndarray, source: np.ndarray
+    ) -> np.ndarray:
+        """Advance one supplied heat field without committing shared state."""
+        candidate = np.asarray(heat_field, dtype=float)
+        if candidate.shape != self.map.shape:
+            raise ValueError("heat_field must have the HEDAC map shape")
+        source_values = np.asarray(source, dtype=float)
+        if source_values.shape != self.map.shape:
+            raise ValueError("source must have the HEDAC map shape")
 
-        # Normalize local cooling
         local_cooling_norm = normalize_to_pdf(self.local_cooling, self.map)
         local_cooling_norm *= self.map_loader.area
-
-        # Enforce CFL stability for the explicit heat update
         cfl_safety = float(self.params.get("heat_equation.cfl_safety", 0.9) or 0.9)
         alpha = float(self.params.alpha)
         dx = float(self.params.dx)
-        # Guard alpha to avoid division by zero; fall back to dt if alpha is zero
         dt_cfl = self.params.dt if alpha == 0 else cfl_safety * dx * dx / (4.0 * alpha)
         dt_heat = min(self.params.dt, dt_cfl)
-
-        # Update heat equation with area-normalized beta and local_cooling
-        # self.heat_field = update_heat_optimized(
-        #     self.heat_field,
-        #     source,
-        #     self.map,
-        #     local_cooling_norm,
-        #     dt_heat,
-        #     alpha,
-        #     self.params.source_strength,
-        #     self._beta_normalized,
-        #     self._local_cooling_normalized,
-        #     dx,
-        # ).astype(np.float32)
-        self.heat_field = update_heat(
-            self.heat_field,
-            source,
+        return update_heat(
+            candidate,
+            source_values,
             self.map,
             local_cooling_norm,
             dt_heat,
@@ -216,7 +225,17 @@ class HEDACAlgorithm:
             dx,
         ).astype(np.float32)
 
-    def get_agent_gradient(self, agent: AgentLike) -> np.ndarray:
+    def update_heat_field(self):
+        """Update heat field using heat equation."""
+        source = self.compute_source_term()
+        self.heat_field = self._advance_heat_field(self.heat_field, source)
+
+    def get_agent_gradient(
+        self,
+        agent: AgentLike,
+        *,
+        heat_field: np.ndarray | None = None,
+    ) -> np.ndarray:
         """
         Get movement gradient for an agent.
 
@@ -229,7 +248,10 @@ class HEDACAlgorithm:
         # Compute gradients from heat field
         # heat_field has shape (height, width) = (y, x)
         # np.gradient returns [d/d(row), d/d(col)] = [d/dy, d/dx]
-        gradient_y, gradient_x = np.gradient(self.heat_field)
+        field = self.heat_field if heat_field is None else np.asarray(heat_field)
+        if field.shape != self.map.shape:
+            raise ValueError("heat_field must have the HEDAC map shape")
+        gradient_y, gradient_x = np.gradient(field)
 
         # Normalize gradient fields globally (critical for stable agent movement)
         # This prevents the raw gradient magnitudes from dominating the movement

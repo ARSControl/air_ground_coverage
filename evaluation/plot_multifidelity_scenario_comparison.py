@@ -141,6 +141,12 @@ def _validate_pair(
         raise ValueError(
             "scenario archives must use the same hyperparameter optimization policy"
         )
+    easy_control = easy_metadata.get("aerial_ergodic_control", {"mode": "centralized"})
+    hard_control = hard_metadata.get("aerial_ergodic_control", {"mode": "centralized"})
+    if easy_control != hard_control:
+        raise ValueError(
+            "scenario archives must use the same aerial ergodic-control policy"
+        )
 
 
 def main() -> None:

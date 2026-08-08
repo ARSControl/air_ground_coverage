@@ -99,6 +99,9 @@ multifidelity:
       discrepancy_variance: [0.01, 2.0]
 
 aerial:
+  ergodic_control:
+    mode: decentralized
+    neighbor_weighting: hard
   simulation:
     num_agents: 4
   agents:

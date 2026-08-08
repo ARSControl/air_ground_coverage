@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from .core import costFunctions
 from .core.GaussianProcess import GaussianProcess
 from .core.base import HEDACParams, MapLoader
+from .core.decentralized_hedac import DecentralizedHEDACAlgorithm
 from .core.gmm import GMM
 from .core.hedac import HEDACAlgorithm
 from .core.obstacles import generate_circular_obstacle_map
@@ -318,7 +319,11 @@ def build_coupled_simulation(
         map_loader.get_free_cells(),
         initialization_seed=seed + 40_000,
     )
-    hedac = HEDACAlgorithm(aerial_params, map_loader, goal_density)
+    aerial_control_mode = _aerial_ergodic_control_mode(aerial_params)
+    if aerial_control_mode == "decentralized":
+        hedac = DecentralizedHEDACAlgorithm(aerial_params, map_loader, goal_density)
+    else:
+        hedac = HEDACAlgorithm(aerial_params, map_loader, goal_density)
 
     ground_params.dt = aerial_params.dt
     ground_free_cells = np.argwhere(ground_map == 0)
@@ -770,6 +775,18 @@ def _build_map_loader(params: HEDACParams) -> MapLoader:
         return MapLoader(map_path=str(Path(map_path)), resolution=params.resolution)
     size = tuple(params.map_config.get("size", [50, 50]))
     return MapLoader(size=size, resolution=params.resolution)
+
+
+def _aerial_ergodic_control_mode(params: HEDACParams) -> str:
+    value = params.get("ergodic_control.mode", "centralized")
+    if not isinstance(value, str):
+        raise TypeError("ergodic_control.mode must be a string")
+    mode = value.strip().lower()
+    if mode not in {"centralized", "decentralized"}:
+        raise ValueError(
+            "ergodic_control.mode must be 'centralized' or 'decentralized'"
+        )
+    return mode
 
 
 def _build_goal_density(

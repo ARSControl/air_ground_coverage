@@ -380,6 +380,17 @@ def run_composition_sweep(
         "hyperparameter_optimization": deepcopy(
             base.aerial.get("multifidelity.hyperparameter_optimization")
         ),
+        "aerial_ergodic_control": {
+            "mode": str(base.aerial.get("ergodic_control.mode", "centralized"))
+            .strip()
+            .lower(),
+            "neighbor_weighting": str(
+                base.aerial.get("ergodic_control.neighbor_weighting", "hard")
+            )
+            .strip()
+            .lower(),
+            "communication_range": float(base.aerial.sens_range),
+        },
         "fairness_controls": {
             "equal_sensor_periods": True,
             "equal_observations_per_robot_event": True,

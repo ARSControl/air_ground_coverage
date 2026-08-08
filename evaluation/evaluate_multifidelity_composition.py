@@ -192,6 +192,14 @@ def evaluate_composition_archive(
         "hyperparameter_optimization": raw_metadata.get(
             "hyperparameter_optimization", {"enabled": False}
         ),
+        "aerial_ergodic_control": raw_metadata.get(
+            "aerial_ergodic_control",
+            {
+                "mode": "centralized",
+                "neighbor_weighting": "hard",
+                "communication_range": None,
+            },
+        ),
         "metric_definitions": {
             "kl": "weighted D_KL(truth_density || posterior_density)",
             "nrmse": (

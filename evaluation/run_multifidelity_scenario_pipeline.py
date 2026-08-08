@@ -47,10 +47,10 @@ class ScenarioArtifacts:
 
 @dataclass(frozen=True)
 class ScenarioPipelineResult:
-    """Complete output set from one two-scenario pipeline execution."""
+    """Complete output set from one selected-scenario pipeline execution."""
 
-    scenarios: tuple[ScenarioArtifacts, ScenarioArtifacts]
-    comparison_metrics_plot: Path
+    scenarios: tuple[ScenarioArtifacts, ...]
+    comparison_metrics_plot: Path | None
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,6 +75,20 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="override simulation.num_episodes for every declared scenario",
+    )
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
+        "--scenario",
+        default=None,
+        help=(
+            "named composition_sweep scenario; defaults to the configured "
+            "default_scenario (easy_long in the publication configuration)"
+        ),
+    )
+    selection.add_argument(
+        "--all-scenarios",
+        action="store_true",
+        help="run every declared scenario and create a comparison when there are two",
     )
     parser.add_argument("--bootstrap-samples", type=int, default=1000)
     parser.add_argument("--dpi", type=int, default=180)
@@ -103,8 +117,10 @@ def run_scenario_pipeline(
     dpi: int = 180,
     progress: bool = True,
     reuse_raw: bool = False,
+    scenario: str | None = None,
+    all_scenarios: bool = False,
 ) -> ScenarioPipelineResult:
-    """Run or reuse both scenarios and produce all archives and figures."""
+    """Run or reuse the selected scenario set and produce its artifacts."""
     if not isinstance(composition, str) or not composition.strip():
         raise TypeError("composition must be a nonempty string")
     if isinstance(episode, bool) or not isinstance(episode, int) or episode < 0:
@@ -125,6 +141,12 @@ def run_scenario_pipeline(
         raise TypeError("progress must be a boolean")
     if not isinstance(reuse_raw, bool):
         raise TypeError("reuse_raw must be a boolean")
+    if scenario is not None and (not isinstance(scenario, str) or not scenario.strip()):
+        raise TypeError("scenario must be a nonempty string or None")
+    if not isinstance(all_scenarios, bool):
+        raise TypeError("all_scenarios must be a boolean")
+    if scenario is not None and all_scenarios:
+        raise ValueError("scenario and all_scenarios are mutually exclusive")
 
     configuration = load_coupled_configuration(config_path)
     if not configuration.aerial.get(
@@ -134,11 +156,27 @@ def run_scenario_pipeline(
             "scenario pipeline requires hyperparameter optimization to be enabled"
         )
     declared = configuration.aerial.get("composition_sweep.scenarios", None)
-    if not isinstance(declared, dict) or len(declared) != 2:
-        raise ValueError(
-            "scenario pipeline requires exactly two named composition_sweep scenarios"
+    if not isinstance(declared, dict) or not declared:
+        raise ValueError("scenario pipeline requires named composition_sweep scenarios")
+    if all_scenarios:
+        scenario_names = tuple(str(name) for name in declared)
+    else:
+        selected = (
+            configuration.aerial.get("composition_sweep.default_scenario")
+            if scenario is None
+            else scenario.strip()
         )
-    scenario_names = tuple(str(name) for name in declared)
+        if not isinstance(selected, str) or not selected.strip():
+            raise ValueError(
+                "composition_sweep.default_scenario must be a nonempty string"
+            )
+        selected = selected.strip()
+        if selected not in declared:
+            choices = ", ".join(str(name) for name in declared)
+            raise ValueError(
+                f"unknown scenario {selected!r}; available scenarios: {choices}"
+            )
+        scenario_names = (selected,)
     episode_count = (
         int(configuration.aerial.num_episodes) if episodes is None else episodes
     )
@@ -221,15 +259,17 @@ def run_scenario_pipeline(
             )
         )
 
-    comparison_path = plot_directory / "scenario_comparison_metrics.png"
-    plot_scenario_comparison(
-        artifacts[0].evaluated_archive,
-        artifacts[1].evaluated_archive,
-        comparison_path,
-        bootstrap_samples=bootstrap_samples,
-    )
+    comparison_path = None
+    if len(artifacts) == 2:
+        comparison_path = plot_directory / "scenario_comparison_metrics.png"
+        plot_scenario_comparison(
+            artifacts[0].evaluated_archive,
+            artifacts[1].evaluated_archive,
+            comparison_path,
+            bootstrap_samples=bootstrap_samples,
+        )
     return ScenarioPipelineResult(
-        scenarios=(artifacts[0], artifacts[1]),
+        scenarios=tuple(artifacts),
         comparison_metrics_plot=comparison_path,
     )
 
@@ -253,6 +293,8 @@ def main() -> None:
         dpi=arguments.dpi,
         progress=not arguments.no_progress,
         reuse_raw=arguments.reuse_raw,
+        scenario=arguments.scenario,
+        all_scenarios=arguments.all_scenarios,
     )
     for artifact in result.scenarios:
         print(f"scenario={artifact.scenario}")
@@ -260,7 +302,8 @@ def main() -> None:
         print(f"evaluated_archive={artifact.evaluated_archive}")
         print(f"metrics_plot={artifact.metrics_plot}")
         print(f"trajectory_plot={artifact.trajectory_plot}")
-    print(f"scenario_comparison_plot={result.comparison_metrics_plot}")
+    if result.comparison_metrics_plot is not None:
+        print(f"scenario_comparison_plot={result.comparison_metrics_plot}")
 
 
 if __name__ == "__main__":
