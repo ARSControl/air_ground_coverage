@@ -1,0 +1,16 @@
+# Opt-in finite-aerial-range Zhang-LR stress-test extension. The original
+# full-cell Zhang comparison remains in configs/zhang_comparison.yaml.
+normalized_domain_size: 3.0
+
+algorithm:
+  aerial_sensing_mode: limited
+  deployment_gain: 0.4
+  deployment_tolerance: 2.0e-2
+  deployment_max_steps: 1000
+  consensus_gain: 0.1
+  consensus_gain_fraction: 0.5
+  consensus_iterations: 100
+  weight_gain: 0.09
+  aerial_gain: 0.1
+  transfer_gain: 0.2
+  ground_gain: 0.4

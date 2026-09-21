@@ -1,0 +1,30 @@
+simulation:
+  dt: 0.05
+  num_steps: 8
+  num_episodes: 1
+  random_seed: 7
+
+domain:
+  bounds: [-1.5, 1.5, -1.5, 1.5]
+  grid_shape: [25, 25]
+
+field:
+  low_resolution: 1.0e-2
+  high_resolution: 1.0e-5
+
+sweep:
+  compositions:
+    - {aerial: 2, ground: 5}
+    - {aerial: 3, ground: 6}
+  ground_sensing_ranges: [0.35, 0.55]
+
+algorithm:
+  deployment_gain: 0.4
+  deployment_tolerance: 2.0e-2
+  deployment_max_steps: 120
+  consensus_gain: 0.02
+  consensus_iterations: 30
+  weight_gain: 0.09
+  aerial_gain: 0.1
+  transfer_gain: 0.2
+  ground_gain: 0.4

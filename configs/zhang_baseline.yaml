@@ -1,0 +1,35 @@
+# Standalone obstacle-free implementation of Zhang et al. (T-ASE 2026).
+simulation:
+  dt: 0.05
+  num_steps: 1000
+  num_episodes: 1
+  random_seed: 42
+
+domain:
+  bounds: [-1.5, 1.5, -1.5, 1.5]
+  grid_shape: [61, 61]
+
+field:
+  low_resolution: 1.0e-2
+  high_resolution: 1.0e-5
+
+# The default experiment fixes the paper's A5/G14 team and sweeps the limited
+# ground sensing radius. Add further entries to compositions for a valid team
+# composition sweep; every entry must satisfy aerial > 1 and ground > aerial.
+sweep:
+  compositions:
+    - {aerial: 5, ground: 14}
+  ground_sensing_ranges: [0.50]
+
+algorithm:
+  deployment_gain: 0.4
+  # Below the 0.05 grid spacing but large enough to avoid raster-centroid
+  # limit cycles at a numerically meaningless sub-grid tolerance.
+  deployment_tolerance: 1.0e-2
+  deployment_max_steps: 1000
+  consensus_gain: 0.1
+  consensus_iterations: 100
+  weight_gain: 0.09
+  aerial_gain: 0.1
+  transfer_gain: 0.2
+  ground_gain: 0.4

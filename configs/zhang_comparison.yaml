@@ -1,0 +1,21 @@
+# Zhang controller parameters for paired proposed/Egerstedt/Zhang comparisons.
+# Coordinates from the source archive are affinely normalized to a 3x3 square
+# before applying the paper gains, then mapped back for common evaluation.
+normalized_domain_size: 3.0
+
+algorithm:
+  deployment_gain: 0.4
+  # The normalized 50x50 comparison grid has spacing about 0.061. This
+  # sub-grid tolerance avoids making the phase transition depend on raster
+  # centroid jitter below meaningful spatial resolution.
+  deployment_tolerance: 2.0e-2
+  deployment_max_steps: 1000
+  consensus_gain: 0.1
+  # Select a theorem-compliant episode gain equal to this fraction of
+  # min_i(s_i^0 / |N_i|); the fixed gain above remains documented fallback.
+  consensus_gain_fraction: 0.5
+  consensus_iterations: 100
+  weight_gain: 0.09
+  aerial_gain: 0.1
+  transfer_gain: 0.2
+  ground_gain: 0.4

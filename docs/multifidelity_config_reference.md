@@ -55,12 +55,15 @@ alter the general coupled CLI.
 | `composition_sweep.total_robots` | `10` | Fixed $N=N_a+N_g$ used for every declared composition and padded state width. |
 | `composition_sweep.aerial_counts` | `[10, 2, 0]` | Ordered aerial counts producing A10/G0, A2/G8, and A0/G10. |
 | `composition_sweep.total_retained_samples` | `400` | Fixed active LOW+HIGH retention budget, split in proportion to team makeup. |
-| `composition_sweep.default_scenario` | `easy_long` | Scenario used by the single-scenario Python API when no scenario is supplied. The CLI runs every declared scenario when `--scenario` is omitted. |
-| `composition_sweep.scenarios.<name>.num_steps` | `200` / `100` | Scenario-specific integration-step count. Explicit CLI `--num-steps` takes precedence and is recorded. |
-| `composition_sweep.scenarios.<name>.num_obstacles` | `5` / `15` | Scenario-specific deterministic circular ground-obstacle count. |
-| `composition_sweep.scenarios.<name>.obstacles_radius` | `1.0` / `2.0` | Scenario-specific common ground-obstacle radius. |
+| `composition_sweep.default_scenario` | `easy_long` | The sole scenario in the publication composition study and the scenario selected by the one-command pipeline. |
+| `composition_sweep.scenarios.easy_long.num_steps` | `300` | Integration-step count, giving a 30 s mission at $\Delta t=0.1$ s. Explicit lower-level CLI `--num-steps` overrides it and is recorded. |
+| `composition_sweep.scenarios.easy_long.num_obstacles` | `5` | Deterministic circular ground-obstacle count. |
+| `composition_sweep.scenarios.easy_long.obstacles_radius` | `1.0` | Common ground-obstacle radius. |
 
-Named scenarios must define all three override leaves; unknown scenarios,
+The publication configuration declares no hard scenario. Generic and smoke
+configurations may still declare multiple scenarios because the reusable
+pipeline retains its scenario-selection interface. Named scenarios must define
+all three override leaves; unknown scenarios,
 missing leaves, and unsupported leaves are rejected. Configurations without a
 `scenarios` mapping retain the historical single-scenario behavior and are
 recorded under the name `default`.
@@ -171,6 +174,8 @@ posterior uncertainty enters only through the separate aerial uncertainty term.
 
 | Parameter | Current value | Status | Meaning | Expected effect when changed |
 |---|---:|---|---|---|
+| `aerial.ergodic_control.mode` | `decentralized` in composition configs; otherwise `centralized` by default | Both | Selects the existing shared-history/shared-heat HEDAC controller or one local coverage memory and heat field per aerial robot. | `decentralized` makes only current range neighbors influence a robot's local coverage error and normally changes trajectories and runtime. |
+| `aerial.ergodic_control.neighbor_weighting` | `hard` | Decentralized only | Spatial weight applied to current neighbors' coverage summaries. The first implementation accepts a hard indicator with support equal to the communication range. | Categorical; unsupported values fail during controller construction. |
 | `aerial.simulation.num_agents` | `3` | Both | Number of aerial robots. | Higher collects more LOW samples per event and covers more area, with more controller/sensor cost. |
 | `aerial.agents.model_type` | `dubins` | Both | Aerial dynamics class (`dubins`, `unicycle`, or fallback double integrator). | Categorical. Changing it changes which motion parameters below are active and changes trajectories substantially. |
 | `aerial.agents.max_velocity` | `3.0` | Limited | HEDAC target-velocity scale. For the current Dubins tracker only its direction is used. | Little/no trajectory effect with `dubins`; it becomes a true speed cap for double-integrator agents. |
@@ -185,7 +190,7 @@ posterior uncertainty enters only through the separate aerial uncertainty term.
 | `aerial.agents.dubins.max_bank_angle` | `60.0` | Both | Bank-angle limit used to derive `max_turn_rate = g*tan(bank)/speed`. | Higher permits tighter/faster turns; keep below the tangent singularity near 90 degrees. |
 | `aerial.sensor.fov_degrees` | `360.0` | MF active | Angular span over which each LOW sensor event distributes samples. | Higher gives broader directional coverage; lower focuses samples around heading. Valid range is `(0, 360]`. |
 | `aerial.sensor.fov_depth` | `10.0` | MF active | Maximum LOW sampling distance from each aerial robot. | Higher observes farther and improves spatial spread; lower concentrates samples locally. |
-| `aerial.multi_agent.sensing_range` | `10.0` | Inactive | Stored neighbor-detection range. The coupled loop does not call neighbor updates. | No current effect. |
+| `aerial.multi_agent.sensing_range` | `10.0` | Decentralized only | Euclidean communication radius used to rebuild current aerial neighbor sets and the hard spatial support for exchanged coverage densities. | Higher admits more neighbor histories and approaches shared team coverage; lower isolates controllers more often. |
 | `aerial.multi_agent.min_safe_distance` | `1.0` | Inactive | Intended minimum inter-robot separation. | No current effect; no collision constraint reads it. |
 
 ### Aerial legacy-GP compatibility keys
@@ -267,6 +272,16 @@ GP uses `multifidelity.high_noise_variance`, not the legacy noise keys.
 | `ground.lloyd.centroid_tolerance` | `0.05` | Both, Lloyd only | Distance within which both Lloyd commands are set to zero. | Higher reduces small motions but stops farther from the discrete centroid; lower tracks more precisely. |
 | `ground.lloyd.max_linear_velocity` | `4.0` | Both, Lloyd only | Controller-level absolute linear-speed cap; the unicycle agent also applies `agents.max_velocity`. | Higher is effective only up to the agent cap; lower directly slows centroid tracking. |
 | `ground.lloyd.max_angular_velocity` | `5.0` | Both, Lloyd only | Controller-level absolute angular-rate cap; the unicycle agent also applies `agents.max_angular_velocity`. | Higher is effective only up to the agent cap; lower produces wider/slower turns. |
+
+## Paired Zhang aerial-sensing selector
+
+This selector belongs to `configs/zhang_comparison.yaml` and
+`configs/zhang_lr_comparison.yaml`, not the coupled multi-fidelity parameter
+views.
+
+| Parameter | Default | Meaning | Effect |
+|---|---|---|---|
+| `algorithm.aerial_sensing_mode` | `full_cell` when omitted | Selects the paper-assumption Zhang controller or the explicitly labelled finite-range Zhang-LR extension. | `full_cell` integrates complete power cells and preserves existing behavior. `limited` reads the paired archive's `aerial_sensing_range`, clips LOW-field masses and boundary information to each aerial sensing disk, and records cell-support fractions. |
 
 ## Practical tuning order
 

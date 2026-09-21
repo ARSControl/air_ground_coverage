@@ -49,6 +49,12 @@ def parse_args() -> argparse.Namespace:
         default=Path("output/baseline_comparison/egerstedt/raw.npz"),
     )
     parser.add_argument(
+        "--aerial-sensing-range",
+        type=float,
+        default=None,
+        help="override the controller's effective aerial range without changing the paired scenario",
+    )
+    parser.add_argument(
         "--no-progress", action="store_true", help="disable terminal progress output"
     )
     return parser.parse_args()
@@ -58,6 +64,7 @@ def run_egerstedt_comparison(
     scenario_path: str | Path,
     output_path: str | Path,
     *,
+    aerial_sensing_range: float | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> Path:
     """Run the literature baseline without importing proposed-method code."""
@@ -85,11 +92,17 @@ def run_egerstedt_comparison(
         progress_callback(0, total_steps, "loading paired Egerstedt scenarios")
 
     ground_range = float(source["ground_sensing_range"])
-    aerial_range = float(source["aerial_sensing_range"])
+    scenario_aerial_range = float(source["aerial_sensing_range"])
+    aerial_range = (
+        scenario_aerial_range
+        if aerial_sensing_range is None
+        else _positive_finite_float(aerial_sensing_range, "aerial_sensing_range")
+    )
     x_min = float(np.min(query_points[:, 0]))
     x_max = float(np.max(query_points[:, 0]))
     y_min = float(np.min(query_points[:, 1]))
     y_max = float(np.max(query_points[:, 1]))
+    domain_diagonal = float(np.hypot(x_max - x_min, y_max - y_min))
     cell_area = _uniform_cell_area(query_points)
 
     ground_runs: list[np.ndarray] = []
@@ -212,6 +225,13 @@ def run_egerstedt_comparison(
             "ground_controller": "range-limited Lloyd plus hierarchical allocation",
             "kinematics": "first-order point robots",
         },
+        "aerial_sensing": {
+            "scenario_range": scenario_aerial_range,
+            "effective_range": aerial_range,
+            "overridden": aerial_sensing_range is not None,
+            "domain_diagonal": domain_diagonal,
+            "covers_complete_domain": aerial_range >= domain_diagonal,
+        },
         "comparable_metrics": {
             "kl": False,
             "nrmse": False,
@@ -236,16 +256,16 @@ def run_egerstedt_comparison(
         "initial_ground_positions": np.array(
             source["initial_ground_states"][:, :, :2], copy=True
         ),
-        "initial_aerial_states": np.array(
-            source["initial_aerial_states"], copy=True
-        ),
-        "initial_ground_states": np.array(
-            source["initial_ground_states"], copy=True
-        ),
+        "initial_aerial_states": np.array(source["initial_aerial_states"], copy=True),
+        "initial_ground_states": np.array(source["initial_ground_states"], copy=True),
         "aerial_positions": np.asarray(aerial_runs, dtype=float),
         "ground_positions": np.asarray(ground_runs, dtype=float),
         "aerial_fov_degrees": np.asarray(360.0),
-        "aerial_sensing_range": np.asarray(aerial_range),
+        # This scenario-contract value remains unchanged so both Egerstedt
+        # variants retain the source fingerprint. The controller-specific
+        # override is archived separately below.
+        "aerial_sensing_range": np.asarray(scenario_aerial_range),
+        "effective_aerial_sensing_range": np.asarray(aerial_range),
         "ground_fov_degrees": np.asarray(360.0),
         "ground_sensing_range": np.asarray(ground_range),
         "locational_cost": np.asarray(cost_runs, dtype=float),
@@ -306,11 +326,18 @@ def _uniform_cell_area(query_points: np.ndarray) -> float:
         raise ValueError("Egerstedt baseline requires a Cartesian query grid")
     x_steps = np.diff(x_values)
     y_steps = np.diff(y_values)
-    if not (
-        np.allclose(x_steps, x_steps[0]) and np.allclose(y_steps, y_steps[0])
-    ):
+    if not (np.allclose(x_steps, x_steps[0]) and np.allclose(y_steps, y_steps[0])):
         raise ValueError("Egerstedt baseline requires a uniform query grid")
     return float(x_steps[0] * y_steps[0])
+
+
+def _positive_finite_float(value: float, name: str) -> float:
+    if isinstance(value, bool):
+        raise TypeError(f"{name} must be a real number")
+    result = float(value)
+    if not np.isfinite(result) or result <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return result
 
 
 def main() -> None:
@@ -320,6 +347,7 @@ def main() -> None:
         path = run_egerstedt_comparison(
             arguments.scenario,
             arguments.output,
+            aerial_sensing_range=arguments.aerial_sensing_range,
             progress_callback=None if progress is None else progress.update,
         )
     finally:

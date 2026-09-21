@@ -1,0 +1,15 @@
+normalized_domain_size: 3.0
+
+algorithm:
+  aerial_sensing_mode: limited
+  # Immediate transition keeps the paired runner test short.
+  deployment_gain: 0.4
+  deployment_tolerance: 10.0
+  deployment_max_steps: 100
+  consensus_gain: 0.1
+  consensus_gain_fraction: 0.5
+  consensus_iterations: 10
+  weight_gain: 0.09
+  aerial_gain: 0.1
+  transfer_gain: 0.2
+  ground_gain: 0.4

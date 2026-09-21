@@ -9,7 +9,11 @@ from evaluation.multifidelity_ablation_io import load_archive, save_archive
 
 MULTIFIDELITY_COMPARISON_RAW_ARCHIVE_KIND = "multifidelity_comparison_raw"
 EGERSTEDT_COMPARISON_RAW_ARCHIVE_KIND = "egerstedt_comparison_raw"
+ZHANG_COMPARISON_RAW_ARCHIVE_KIND = "zhang_comparison_raw"
 BASELINE_COMPARISON_EVALUATED_ARCHIVE_KIND = "baseline_comparison_evaluated"
+THREE_METHOD_COMPARISON_EVALUATED_ARCHIVE_KIND = "three_method_comparison_evaluated"
+FOUR_METHOD_COMPARISON_EVALUATED_ARCHIVE_KIND = "four_method_comparison_evaluated"
+ZHANG_VARIANT_COMPARISON_EVALUATED_ARCHIVE_KIND = "zhang_variant_comparison_evaluated"
 SCENARIO_ARRAYS = (
     "seeds",
     "state_times",
@@ -43,7 +47,11 @@ def scenario_fingerprint(arrays: dict[str, np.ndarray]) -> str:
 __all__ = (
     "BASELINE_COMPARISON_EVALUATED_ARCHIVE_KIND",
     "EGERSTEDT_COMPARISON_RAW_ARCHIVE_KIND",
+    "FOUR_METHOD_COMPARISON_EVALUATED_ARCHIVE_KIND",
     "MULTIFIDELITY_COMPARISON_RAW_ARCHIVE_KIND",
+    "THREE_METHOD_COMPARISON_EVALUATED_ARCHIVE_KIND",
+    "ZHANG_COMPARISON_RAW_ARCHIVE_KIND",
+    "ZHANG_VARIANT_COMPARISON_EVALUATED_ARCHIVE_KIND",
     "load_archive",
     "save_archive",
     "scenario_fingerprint",
