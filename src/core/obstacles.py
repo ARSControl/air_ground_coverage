@@ -19,6 +19,60 @@ class CircularObstacleMap:
     resolution: float
 
 
+def line_of_sight_is_clear(
+    occupancy: NDArray[np.generic],
+    start: tuple[float, float] | NDArray[np.floating],
+    end: tuple[float, float] | NDArray[np.floating],
+) -> bool:
+    """Return whether a closed 2-D segment avoids occupied raster cells.
+
+    Raster cell ``(y, x)`` represents the closed unit square centred at
+    ``(x, y)``. Contact with an occupied cell boundary is conservatively
+    classified as occluded. Both segment endpoints must lie inside the map's
+    centre-coordinate bounds.
+    """
+    raw_occupancy = np.asarray(occupancy)
+    if raw_occupancy.ndim != 2:
+        raise ValueError("occupancy must be a two-dimensional raster")
+    if raw_occupancy.shape[0] < 1 or raw_occupancy.shape[1] < 1:
+        raise ValueError("occupancy must be nonempty")
+    try:
+        finite_occupancy = np.asarray(raw_occupancy, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("occupancy must be numeric or boolean") from exc
+    if not np.all(np.isfinite(finite_occupancy)):
+        raise ValueError("occupancy must contain only finite values")
+    blocked = finite_occupancy != 0.0
+    segment_start = _finite_point(start, "start")
+    segment_end = _finite_point(end, "end")
+    height, width = blocked.shape
+    for point, name in ((segment_start, "start"), (segment_end, "end")):
+        if not (0.0 <= point[0] <= width - 1 and 0.0 <= point[1] <= height - 1):
+            raise ValueError(f"{name} must lie inside the map bounds")
+
+    if not np.any(blocked):
+        return True
+
+    minimum = np.minimum(segment_start, segment_end)
+    maximum = np.maximum(segment_start, segment_end)
+    x_min = max(0, int(math.ceil(minimum[0] - 0.5)))
+    x_max = min(width - 1, int(math.floor(maximum[0] + 0.5)))
+    y_min = max(0, int(math.ceil(minimum[1] - 0.5)))
+    y_max = min(height - 1, int(math.floor(maximum[1] + 0.5)))
+    occupied_cells = np.argwhere(blocked[y_min : y_max + 1, x_min : x_max + 1])
+    for local_y, local_x in occupied_cells:
+        cell_x = x_min + int(local_x)
+        cell_y = y_min + int(local_y)
+        if _segment_intersects_closed_cell(
+            segment_start,
+            segment_end,
+            cell_x,
+            cell_y,
+        ):
+            return False
+    return True
+
+
 def generate_circular_obstacle_map(
     size: tuple[int, int],
     *,
@@ -111,6 +165,50 @@ def _validated_size(size: tuple[int, int]) -> tuple[int, int]:
     if height < 2 or width < 2:
         raise ValueError("size entries must be at least two")
     return int(height), int(width)
+
+
+def _finite_point(
+    value: tuple[float, float] | NDArray[np.floating], name: str
+) -> NDArray[np.float64]:
+    try:
+        point = np.asarray(value, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite two-value coordinate") from exc
+    if point.shape != (2,) or not np.all(np.isfinite(point)):
+        raise ValueError(f"{name} must be a finite two-value coordinate")
+    return np.array(point, dtype=float, copy=True)
+
+
+def _segment_intersects_closed_cell(
+    start: NDArray[np.float64],
+    end: NDArray[np.float64],
+    cell_x: int,
+    cell_y: int,
+) -> bool:
+    """Apply a slab intersection test to one closed unit raster cell."""
+    displacement = end - start
+    lower = np.array((cell_x - 0.5, cell_y - 0.5), dtype=float)
+    upper = np.array((cell_x + 0.5, cell_y + 0.5), dtype=float)
+    entry = 0.0
+    exit_ = 1.0
+    tolerance = 1.0e-12
+    for axis in range(2):
+        if abs(displacement[axis]) <= tolerance:
+            if (
+                start[axis] < lower[axis] - tolerance
+                or start[axis] > upper[axis] + tolerance
+            ):
+                return False
+            continue
+        first = (lower[axis] - start[axis]) / displacement[axis]
+        second = (upper[axis] - start[axis]) / displacement[axis]
+        axis_entry = min(first, second)
+        axis_exit = max(first, second)
+        entry = max(entry, axis_entry)
+        exit_ = min(exit_, axis_exit)
+        if entry > exit_ + tolerance:
+            return False
+    return entry <= 1.0 + tolerance and exit_ >= -tolerance
 
 
 def _positive_float(value: float, name: str) -> float:

@@ -11,6 +11,7 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.ndimage import gaussian_filter
 
 from ..core.observations import Fidelity, Observation
+from ..core.obstacles import line_of_sight_is_clear
 
 
 FloatArray = NDArray[np.float64]
@@ -123,6 +124,7 @@ class SimulatedScalarFieldSensor:
         noise_variance: float,
         rng: np.random.Generator,
         max_resample_attempts: int = 50,
+        obstacle_map: ArrayLike | None = None,
     ) -> None:
         if not isinstance(fidelity, Fidelity):
             raise TypeError("fidelity must be a Fidelity value")
@@ -154,6 +156,23 @@ class SimulatedScalarFieldSensor:
         self.noise_variance = noise_variance
         self.rng = rng
         self.max_resample_attempts = max_resample_attempts
+        if obstacle_map is None:
+            self.obstacle_map: BoolArray | None = None
+            self._has_obstacles = False
+        else:
+            raw_obstacles = np.asarray(obstacle_map)
+            if raw_obstacles.ndim != 2:
+                raise ValueError("obstacle_map must be a two-dimensional raster")
+            try:
+                numeric_obstacles = np.asarray(raw_obstacles, dtype=float)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("obstacle_map must be numeric or boolean") from exc
+            if not np.all(np.isfinite(numeric_obstacles)):
+                raise ValueError("obstacle_map must contain only finite values")
+            stored_obstacles = np.array(numeric_obstacles != 0.0, copy=True)
+            stored_obstacles.setflags(write=False)
+            self.obstacle_map = stored_obstacles
+            self._has_obstacles = bool(np.any(stored_obstacles))
 
     def collect(
         self, team: Any, field: ArrayLike, timestamp: float
@@ -164,6 +183,11 @@ class SimulatedScalarFieldSensor:
         if agents is None:
             raise TypeError("team must expose an agents sequence")
         height, width = field_array.shape
+        if (
+            self.obstacle_map is not None
+            and self.obstacle_map.shape != field_array.shape
+        ):
+            raise ValueError("obstacle_map must match the sampled field shape")
         observations: list[Observation] = []
         noise_standard_deviation = math.sqrt(self.noise_variance)
 
@@ -172,11 +196,13 @@ class SimulatedScalarFieldSensor:
             if position.shape != (2,):
                 raise ValueError("agent position must have shape (2,)")
             heading = _agent_heading(agent)
-            sample_positions = (
-                self._sample_position(position, heading, width, height)
-                for _ in range(self.sample_count)
-            )
-            for x_position, y_position in sample_positions:
+            for _ in range(self.sample_count):
+                sample_position = self._sample_position(
+                    position, heading, width, height
+                )
+                if sample_position is None:
+                    continue
+                x_position, y_position = sample_position
                 x_index = int(np.clip(np.rint(x_position), 0, width - 1))
                 y_index = int(np.clip(np.rint(y_position), 0, height - 1))
                 value = float(field_array[y_index, x_index])
@@ -200,20 +226,24 @@ class SimulatedScalarFieldSensor:
         heading: float,
         width: int,
         height: int,
-    ) -> tuple[float, float]:
-        """Draw an area-uniform point inside the heading-centered FOV sector."""
+    ) -> tuple[float, float] | None:
+        """Draw a visible area-uniform point in the heading-centred FOV sector."""
         half_width = 0.5 * math.radians(self.fov_degrees)
         for _ in range(self.max_resample_attempts + 1):
             angle = heading + float(self.rng.uniform(-half_width, half_width))
             distance = self.sample_range * math.sqrt(float(self.rng.uniform()))
             x_position = float(center[0] + distance * math.cos(angle))
             y_position = float(center[1] + distance * math.sin(angle))
-            if 0.0 <= x_position <= width - 1 and 0.0 <= y_position <= height - 1:
-                return x_position, y_position
-        return (
-            float(np.clip(center[0], 0.0, width - 1)),
-            float(np.clip(center[1], 0.0, height - 1)),
-        )
+            if not (0.0 <= x_position <= width - 1 and 0.0 <= y_position <= height - 1):
+                continue
+            if self._has_obstacles and not line_of_sight_is_clear(
+                self.obstacle_map,
+                center,
+                (x_position, y_position),
+            ):
+                continue
+            return x_position, y_position
+        return None
 
 
 def _agent_heading(agent: Any) -> float:

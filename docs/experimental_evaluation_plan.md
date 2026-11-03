@@ -211,33 +211,29 @@ primary outcome of this study.
   distribution, and all controller parameters unrelated to team size remain
   fixed.
 
-### Declared operational scenarios
+### Declared operational scenario
 
-The study compares two bundled operating regimes rather than claiming to
-separately identify obstacle and duration effects:
+The publication study uses one predeclared operating regime:
 
 | Scenario | Steps | Duration | Ground circles | Radius |
 | --- | ---: | ---: | ---: | ---: |
-| `easy_long` | 200 | 20 s | 5 | 1.0 |
-| `hard_short` | 100 | 10 s | 15 | 2.0 |
+| `easy_long` | 300 | 30 s | 5 | 1.0 |
 
-The hard scenario combines a shorter opportunity horizon with more and larger
-ground obstacles. Aerial motion still overflies those circles. Therefore the
-supported claim is explicitly conditional on a short, mobility-constrained
-mission; the two-scenario result alone must not attribute an observed
-difference uniquely to obstacle count, radius, or duration. A future 2-by-2
-easy/hard versus long/short study would be required for that attribution.
+No hard scenario is included in the publication composition sweep. The
+supported comparison is therefore conditional on this 30-second, five-obstacle
+setting and must not be presented as an obstacle-count or mission-duration
+ablation. Aerial motion still overflies the ground circles.
 
 ### Obstacle protocol
 
-Each named scenario uses the declared non-overlapping circular ground
-obstacles. Episode `k` deterministically reuses the same obstacle centres for
-all three compositions within that scenario. Circles constrain ground
+The scenario uses the declared non-overlapping circular ground obstacles.
+Episode `k` deterministically reuses the same obstacle centres for all three
+compositions. Circles constrain ground
 initialization and trajectories, mask the HIGH field and reconstruction
 metrics, and remain traversable by aerial robots flying above them. The
 publication runner records the binary ground map in every raw episode and
 validates paired hidden truth across compositions. Obstacle count, radius, and
-duration must not be tuned after viewing composition outcomes.
+30-second duration must not be tuned after viewing composition outcomes.
 
 The endpoint posterior semantics must remain those of the same autoregressive
 model rather than switching to unrelated single-fidelity estimators:
@@ -274,8 +270,8 @@ set merely because LOW and HIGH samples have separate retention caps.
 Exact sample counts, sensing periods, and the retention-allocation rule must be
 frozen in the experiment configuration before publication results are viewed.
 The frozen ten-robot configuration uses ten observations per robot every
-`0.5` s, hence 100 submitted observations per event. This produces 4000
-submissions in `easy_long` and 2000 in `hard_short`, independently of
+`0.5` s, hence 100 submitted observations per event. The 30-second mission
+contains 60 sensing events and produces 6000 submissions, independently of
 composition. The fixed active retention budget is 400, with LOW/HIGH caps
 `(400,1)`, `(80,320)`, and `(1,400)` in A10/G0, A2/G8, and A0/G10 order.
 Endpoint caps of one are inactive implementation placeholders and do not
@@ -304,7 +300,7 @@ increase the active budget.
 The primary reconstruction outcome is:
 
 1. time-averaged NRMSE of the zero-clipped HIGH-fidelity reconstruction over
-   each scenario's declared horizon.
+   the declared 30-second horizon.
 
 Secondary reconstruction outcomes are final NRMSE, time-to-threshold if a
 threshold is frozen before confirmatory runs, final and time-averaged KL
@@ -316,9 +312,8 @@ reported separately and is not collapsed with reconstruction into an
 arbitrarily weighted scalar score.
 
 Retain complete metric histories and final LOW/HIGH sample counts in the raw
-result archive. Cross-scenario final values are descriptive because the
-missions have different durations; inferential contrasts compare compositions
-within the same scenario.
+result archive. Inferential contrasts compare compositions within the paired
+`easy_long` episodes.
 
 Summaries use the episode as the independent unit. Report episode-bootstrap
 95% confidence intervals and paired differences between each mixed team and
@@ -353,17 +348,11 @@ The preferred compact figure contains:
 
 1. easy/long NRMSE histories for all three compositions;
 2. easy/long KL-divergence histories for all three compositions;
-3. easy/long marginal-NLPD histories for all three compositions;
-4. hard/short NRMSE histories for all three compositions;
-5. hard/short KL-divergence histories for all three compositions;
-6. hard/short marginal-NLPD histories for all three compositions.
+3. easy/long marginal-NLPD histories for all three compositions.
 
 Every panel uses physical mission time and episode-bootstrap 95% confidence
-bands. Like-metric panels share one y-axis scale across scenarios, so vertical
-changes are comparable; x-axis ranges remain scenario-specific because mission
-horizons differ. Final and
-time-averaged values remain in the evaluated archives and publication tables
-but are not displayed in this time-series figure.
+bands. Final and time-averaged values remain in the evaluated archives and
+publication tables but are not displayed in this time-series figure.
 
 Representative truth/reconstruction/error maps for A10/G0, A2/G8, and A0/G10
 may be placed in supplementary material using one predeclared episode.
@@ -376,10 +365,9 @@ been chosen and documented.
 
 ### Implemented scenario-aware command sequence
 
-Each scenario retains a rectangular raw archive with its own time axis. The
-runner selects named overrides from the shared configuration, the unchanged
-offline equations evaluate each archive independently, and a read-only
-plotter combines the evaluated archives:
+The scenario retains a rectangular raw archive with its own time axis. The
+runner selects the named override from the shared configuration and the
+unchanged offline equations evaluate that archive:
 
 ```bash
 MPLCONFIGDIR=/tmp/ral_marta_mpl \
@@ -400,11 +388,11 @@ MPLCONFIGDIR=/tmp/ral_marta_mpl \
   --reuse-raw
 ```
 
-This is the preferred one-command interface. It runs both declared scenarios,
-evaluates each raw archive, renders one aggregate metric figure and one selected
-episode trajectory/reconstruction/error figure per scenario, and finally
-renders the combined scenario metric figure. The equivalent individual stages
-remain available:
+This is the preferred one-command interface. By default it runs only the
+configured `default_scenario`, `easy_long`, evaluates that raw archive, and
+renders its aggregate metric and selected-episode
+trajectory/reconstruction/error figures. The publication configuration
+declares no other scenario. The equivalent individual stages remain available:
 
 ```bash
 .venv/bin/python evaluation/run_multifidelity_composition.py \
@@ -412,22 +400,10 @@ remain available:
 .venv/bin/python evaluation/evaluate_multifidelity_composition.py \
   --input output/composition_easy_long_raw.npz \
   --output output/composition_easy_long_evaluated.npz
-.venv/bin/python evaluation/evaluate_multifidelity_composition.py \
-  --input output/composition_hard_short_raw.npz \
-  --output output/composition_hard_short_evaluated.npz
-MPLCONFIGDIR=/tmp/ral_marta_mpl \
-  .venv/bin/python evaluation/plot_multifidelity_scenario_comparison.py \
-  --easy output/composition_easy_long_evaluated.npz \
-  --hard output/composition_hard_short_evaluated.npz
 ```
 
-With named scenarios present and no `--scenario` flag, that first command runs
-both declarations in YAML order and writes
-`output/composition_easy_long_raw.npz` and
-`output/composition_hard_short_raw.npz`; it never writes or overwrites the
-unsuffixed requested path. Supplying `--scenario easy_long` or
-`--scenario hard_short` runs only that scenario and uses the exact `--output`
-path.
+Supplying `--scenario easy_long` to the lower-level runner explicitly selects
+the publication scenario and uses the exact requested `--output` path.
 
 The publication configuration is `configs/multifidelity_composition.yaml` and
 the deterministic test configuration is
@@ -448,7 +424,7 @@ simulation rerun:
 MPLCONFIGDIR=/tmp/ral_marta_mpl \
   .venv/bin/python \
   evaluation/plot_multifidelity_composition_trajectories.py \
-  --input output/composition_hard_short_raw.npz \
+  --input output/composition_easy_long_raw.npz \
   --composition A2/G8 --episode 0
 ```
 
@@ -482,6 +458,52 @@ extend a baseline to unsupported dynamics, obstacles, or environment geometry.
 If a method does not produce a comparable global density or posterior variance,
 report the corresponding reconstruction or calibration entry as `N/A`.
 
+The standalone Zhang implementation therefore uses the paper's convex,
+obstacle-free $3\times3$ domain and first-order point dynamics. Its default
+experiment holds the `A5/G14` composition fixed and sweeps the ground sensing
+range, matching the paper's sensing-limitation study. The configuration also
+accepts a composition list, restricted to the paper's assumptions $K>1$ and
+$N>K$. A composition-by-range Cartesian sweep is allowed, but a publication
+table should designate one factor as primary rather than interpreting the
+cross-product as a paired multifidelity comparison. The standalone archive is
+kept separate from the multifidelity scenario pipeline.
+
+The final paired experiment fixes A3/G7, removes all obstacles, and uses the
+limited-range proposed-method archive as the immutable scenario contract for
+four conditions: proposed at aerial radius 10, Egerstedt-LR at radius 10,
+full-range Egerstedt at radius 75, and standard full-cell Zhang. Egerstedt's
+effective controller range is stored separately so neither its limited nor
+full-range archive changes the scenario radius or fingerprint. Both Egerstedt
+conditions retain oracle access to truth density. The complete physical mission
+lasts 30 seconds for every method. In the Zhang condition, Algorithm 1 aerial
+deployment starts at $t=0$ while ground positions remain fixed. Algorithm 2
+receives only the remaining time after deployment converges. Consensus rounds
+advance no physical time because the paper defines no communication-round
+period, but their measured wall duration is included in runtime. Each episode
+reports the phase-transition time or an unfinished-deployment indicator.
+
+For a finite-aerial-range stress test, retain the paper-assumption Zhang result
+as the primary baseline and label the opt-in extension `Zhang-LR`. Zhang-LR
+restricts each aerial robot's LOW-field cell mass and boundary information to
+the intersection between its power cell and its saved sensing disk. It does not
+change geometric deployment, ground sensing, or the mission clock. Report the
+minimum and mean power-cell support fractions so the severity of the range
+limit is observable. Do not attribute this clipped-cell extension to Zhang et
+al.; it deliberately evaluates behavior outside their sufficiently-large
+aerial-radius assumption.
+
+The Zhang-LR and direct Zhang variant experiments are implementation and
+sensitivity diagnostics; they are not included in the final four-condition
+comparison. Before reporting a Zhang-LR result separately, run the direct paired
+Zhang diagnostic on the exact same scenario archive. Report the first aerial
+and ground divergence times, final maximum per-robot position differences,
+minimum and mean Zhang-LR support, consensus target masses, final and
+time-averaged footprint-normalized coverage, nearest-ground locational cost,
+and class-specific travel. The standard and limited variants must share the
+scenario fingerprint and every archived scenario array exactly. This diagnostic
+attributes observed changes to the aerial information limit; it is not an
+additional independent baseline.
+
 ### Baseline table
 
 The quantitative baseline table is the primary evidence and should contain:
@@ -499,34 +521,28 @@ not reconstruct a baseline output after the fact merely to fill the table.
 
 Report repeated-run summaries and 95% confidence intervals.
 
-### Baseline trajectory figure
+### Final baseline figure
 
-Use one panel each for:
+Use a one-by-two layout and no auxiliary baseline panels:
 
-1. proposed MFGP;
-2. Rudolph--Wilson--Egerstedt;
-3. Zhang et al.;
-4. optionally, the oracle-density reference if it is included in the study.
+1. footprint-normalized ground coverage over the complete mission, where
+   higher is better;
+2. hidden-truth-weighted nearest-ground locational cost over the complete
+   mission, where lower is better.
 
-Use a one-by-three layout without the optional oracle or a two-by-two layout
-with it. The ground-only condition is already represented in the VI-A
-composition study and need not consume another baseline panel.
+Plot the four episode means with paired episode-bootstrap 95% confidence bands.
+Use explicit labels `Proposed (R_A=10)`, `Egerstedt-LR (R_A=10)`, `Egerstedt
+full-range`, and `Zhang full-cell`. Ground sensing geometry and its coverage
+normalization remain identical in every condition. Do not include trajectory,
+runtime, travel, reconstruction, or Zhang phase panels in the final figure;
+implementation-diagnostic visuals may remain in supplementary documentation.
 
-Every panel must use the same illustrative scenario and show:
-
-- the same ground-truth density as the background;
-- the same obstacles, axes, aspect ratio, and density color scale;
-- ground trajectories as solid lines;
-- aerial trajectories as thinner dashed lines;
-- initial positions as crosses;
-- final positions as filled markers;
-- final ground sensing footprints or FOV sectors;
-- the final covered-mass value as a small annotation.
-
-Do not use each method's estimated density as its background. Use the first
-predeclared evaluation seed, or another selection rule declared before viewing
-comparative results. State in the caption that the trajectories are
-illustrative and that the table contains the repeated-run evidence.
+An optional illustrative two-by-two trajectory figure may be generated for a
+predeclared zero-based episode index. Use episode 0 by default rather than
+selecting after inspecting outcomes. All four panels must share the hidden-truth
+background, axes, aspect ratio, and color scale. This figure is a diagnostic or
+supplementary artifact and does not replace or expand the final two-panel
+quantitative figure.
 
 ## VI-C. Software-in-the-Loop and Computational Performance
 
@@ -591,8 +607,8 @@ and their tables carry the core evidence.
 - [ ] Freeze the composition-independent observation and retained-data budget.
 - [x] Freeze A2/G8 as the operationally motivated mixed composition for a
       future no-discrepancy ablation, with fresh confirmatory seeds required.
-- [x] Implement named easy/long and hard/short scenario selection and a paired
-      evaluated-archive comparison plot.
+- [x] Implement reusable named-scenario selection; freeze the publication
+      composition study to the single 30-second `easy_long` scenario.
 - [ ] Verify faithful implementations and assumption-compatible scenarios for
       both literature baselines.
 - [ ] Freeze evaluation seeds, scenario generation, mission horizon, team

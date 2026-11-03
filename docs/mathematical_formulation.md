@@ -162,6 +162,49 @@ Implementations: `src/core/obstacles.py`, `src/coupled_simulation.py`, and the
 ground-map and initialization-policy recording in
 `evaluation/run_multifidelity_composition.py`.
 
+## Implemented obstacle-aware sensor visibility
+
+Both central multi-fidelity sensors use the shared ground occupancy raster
+$M^G$ when accepting a continuous candidate observation. For robot position
+$\mathbf p$, candidate position $\mathbf q$, configured range $R$, and angular
+field of view $\operatorname{FOV}(\mathbf p)$, the exact implemented admission
+condition is
+
+$$
+a(\mathbf p,\mathbf q)
+=
+\mathbf 1[\|\mathbf q-\mathbf p\|_2\le R]
+\mathbf 1[\mathbf q\in\operatorname{FOV}(\mathbf p)]
+\mathbf 1[\operatorname{LOS}_{M^G}(\mathbf p,\mathbf q)].
+$$
+
+The range and angular conditions are enforced by the existing area-uniform
+sector proposal. For line of sight, occupied raster cell $(y,x)$ represents
+the closed unit square centred at $(x,y)$. The predicate
+$\operatorname{LOS}_{M^G}=1$ exactly when the closed segment
+$[\mathbf p,\mathbf q]$ intersects none of those occupied squares. Boundary or
+tangent contact is therefore conservatively occluded, and a candidate whose
+nearest raster cell is occupied is rejected. Both endpoints must lie in the
+map's centre-coordinate bounds.
+
+Each requested observation is rejection-sampled up to the configured attempt
+limit. Out-of-bounds and occluded candidates are discarded before measurement
+noise is drawn. If no admissible candidate is found, that observation
+opportunity produces no sample; consequently a collection event may return
+fewer than the configured per-robot count, including an empty batch. Empty
+batches leave estimator scheduling and the latest valid posterior unchanged.
+On an obstacle-free raster the LOS predicate is identically true, so the
+accepted-position law remains the original area-uniform sector law.
+
+This 2-D implementation applies the same occupancy raster to LOW aerial and
+HIGH ground sampling even though aerial motion may overfly ground obstacles.
+It therefore models obstacles as vertically occluding the sensed field; no
+obstacle-height or altitude model is currently implemented.
+
+Implementations: `src/core/obstacles.py` for the conservative segment/raster
+test, `src/models/sensors.py` for rejection sampling, and `src/simulation.py`
+for wiring the common obstacle raster into both sensors.
+
 ## Implemented zero-mass posterior-density fallback
 
 Let $M_j$ be the free-query mask, $w_j$ the integration weights,
@@ -528,6 +571,82 @@ post-step robot-state alignment, and final-frame inclusion use the same
 $\mathcal F_I$ rule as the single-composition replay. Implementation:
 `evaluation/render_homogeneous_baseline_episode_videos.py`.
 
+## Implemented proposed-method parameter sensitivity study
+
+The reviewer sensitivity pipeline is a one-factor-at-a-time experiment over
+the proposed central MFGP only. Let $\boldsymbol\eta_0$ be the frozen reference
+configuration and let $\eta_{f,l}$ be level $l$ of factor $f$. Every resolved
+condition is
+
+$$
+\boldsymbol\eta_{f,l}
+=
+\boldsymbol\eta_0
+\text{ with only factor }f\text{ replaced by level }l.
+$$
+
+The six implemented factors are environment dimensions, mixed aerial/ground
+composition, step-count duration, circular-obstacle count/radius, paired
+aerial/ground sensing range, and matched LOW/HIGH measurement-noise variance.
+All factors require exactly one declared reference level. Episode $e$ uses the
+same base seed $s_e=s_0+e$ at every level; a factor intentionally changes the
+scenario arrays implied by that factor, while all other resolved inputs remain
+equal apart from condition-identification metadata.
+
+For active map dimensions $(H,W)$, the special full-environment range resolves
+both sensor radii to
+
+$$
+R_A=R_G=R_{\mathrm{full}}=\sqrt{H^2+W^2}.
+$$
+
+This is at least the diagonal between any two admissible map coordinates. LOS
+occlusion remains active, so `full_environment` removes the radial limit but
+does not see through obstacles. For obstacle count $K_o$ and radius $R_o$, the
+reported nominal density proxy is
+
+$$
+d_o=\frac{K_o\pi R_o^2}{HW},
+$$
+
+while the saved raster is authoritative for realized occupancy. For a mixed
+composition $(N_A,N_G)$ and fixed active retention budget $B$, the implemented
+caps are
+
+$$
+B_L=\max\!\left(1,\operatorname{round}
+\left(B\frac{N_A}{N_A+N_G}\right)\right),
+\qquad
+B_H=\max(1,B-B_L).
+$$
+
+Every condition writes its own raw archive because map grids, team-state
+shapes, and time axes may differ. Offline evaluation computes the existing
+NRMSE, KL, marginal NLPD, calibration, footprint-normalized coverage, and
+truth-weighted nearest-ground locational cost. Final and held-last-posterior
+time-average reconstruction summaries are episode-level statistics. Factor
+plots show episode points and deterministic episode-bootstrap 95% intervals;
+no baseline archive is read or fabricated.
+
+The combined absolute-metric overview uses a common ordinate and one panel per
+factor. For the cross-factor effect plot, condition $l$ is paired with its own
+factor reference by episode seed and reports
+
+$$
+\Delta m_{f,l,e}=m_{f,l,e}-m_{f,0,e}.
+$$
+
+The plotted point is the episode mean of $\Delta m_{f,l,e}$ and its interval is
+the deterministic percentile interval from bootstrap resampling those paired
+episode differences. Thus, for loss metrics such as KL divergence, a negative
+effect means improvement relative to the reference. This visualization does
+not pool time steps or compare unpaired episodes.
+
+Implementations: `evaluation/multifidelity_parameter_sweep.py`,
+`evaluation/run_multifidelity_parameter_sweep.py`, and
+`evaluation/run_multifidelity_comparison.py` for proposed-method raw episodes;
+`evaluation/plot_multifidelity_parameter_sweep_summary.py` for combined views.
+
 ## Implemented footprint-normalized coverage metric
 
 The evaluation pipeline retains the raw hidden-truth mass visible through the
@@ -732,6 +851,33 @@ may also declare multiple compositions, each satisfying $K>1$ and $N>K$.
 Implementations: `evaluation/zhang.py`,
 `evaluation/run_zhang_baseline.py`, and
 `evaluation/plot_zhang_baseline.py`.
+
+### Full-visibility Proposed--Rudolph--Zhang protocol
+
+The dedicated full-visibility comparison resolves an obstacle-free shared
+scenario before running any method. For map dimensions $(H,W)$ it sets both
+proposed-method sensor radii and the Rudolph aerial/ground partition radii to
+
+$$
+R_A=R_G=R_{\mathrm{full}}\geq\sqrt{H^2+W^2},
+\qquad \theta_A=\theta_G=2\pi.
+$$
+
+Consequently, no point is removed by a radial or angular visibility mask.
+Standard Zhang retains its native full-cell information model. The proposed
+method still collects its configured finite number of random observations per
+sensor event: full visibility enlarges the admissible sampling domain but does
+not turn one event into a dense observation of every grid cell. Rudolph uses
+oracle truth density as already documented for that baseline.
+
+The shared archive fixes seeds, hidden fields, initial states, grid, and mission
+clock for all three methods. Zhang's deployment consumes this common clock.
+Since every 360-degree ground footprint covers the whole domain,
+$M_{\mathrm{vis}}(t)=1$ and footprint-normalized coverage is identically one
+up to numerical quadrature; it is therefore non-discriminative here. The
+nearest-ground locational cost, travel, and timing remain meaningful common
+metrics. Implementation:
+`evaluation/run_full_visibility_comparison_pipeline.py`.
 
 ### Paired Zhang mission-clock implementation
 

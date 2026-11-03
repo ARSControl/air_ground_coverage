@@ -2,10 +2,740 @@
 
 ## Current Milestone
 
-The common-corner composition-initialization milestone is **complete and
-verified on 2026-08-05**. Composition experiments now deploy both robot classes
-from a deterministic lower-left corner region while preserving uniform
-initialization as the default for other configurations.
+The full-visibility Proposed--Rudolph--Zhang comparison pipeline is
+**implemented and smoke-verified on 2026-10-21**. It resolves a shared
+obstacle-free, diagonal-covering configuration and runs all three methods on
+the same scenarios and mission clock.
+
+## Full-visibility three-method comparison milestone
+
+- Added `evaluation/run_full_visibility_comparison_pipeline.py` and
+  `tests/test_full_visibility_comparison_pipeline.py`. Tests were added first;
+  their intentional red run failed because the new module did not yet exist.
+- The runner derives the shared full-visibility radius from the map diagonal,
+  applies it to both aerial and ground sensing with 360-degree fields of view,
+  archives the resolved YAML, and rejects obstacles or an undersized explicit
+  radius. Internally `egerstedt` denotes the Rudolph [17] implementation; the
+  three-method figures now use the publication label `Rudolph [17]`.
+- Proposed MFGP, Rudolph, and standard Zhang consume the same saved truth,
+  seeds, initial states, and duration. Zhang's initial deployment remains part
+  of the mission clock. Full visibility changes the proposed method's sampling
+  support, not its configured sample count.
+- A deterministic one-episode/four-step real smoke run completed all three
+  methods and produced evaluated metrics and trajectories. The original-size
+  trajectory figure was inspected, and reproducible copies are under
+  `docs/assets/full_visibility_comparison_smoke/`.
+- Validation passed 2/2 new tests and 22/22 in the relevant three-method,
+  Rudolph-adapter, Zhang, and evaluator selection. Ruff, Python compilation,
+  and changed-file whitespace checks passed. The mathematical reference built
+  successfully as a 26-page PDF with its existing layout warnings. The full
+  suite reported 325 passed and the same four known unrelated failures:
+  canonical step count, ground trajectory color, canonical/ablation FOV
+  mismatch, and progress posterior-version text.
+- Production 30-episode/long-duration experiments were not run. With full
+  ground visibility, probability-mass coverage saturates at one and cannot
+  distinguish controllers. Nearest-ground locational cost, travel, and timing
+  remain informative; this limitation is documented rather than hidden.
+
+## Combined parameter-sweep metric summary milestone
+
+- Added `evaluation/plot_multifidelity_parameter_sweep_summary.py` and reusable
+  overview/effect plotting functions. No simulation is rerun: both figures read
+  only the completed evaluated archives and manifest.
+- The absolute view places all six factors in aligned panels with a shared
+  metric axis, episode points, mean markers, and deterministic bootstrap 95%
+  intervals. The effect view pairs conditions and references by episode seed
+  and plots the mean condition-minus-reference difference with a paired
+  bootstrap interval.
+- The completed 21-condition study generated
+  `docs/assets/all_parameters__final_kl.png` and
+  `docs/assets/all_parameters__final_kl__paired_effects.png`. Both were visually
+  inspected at original resolution. The full-range effect is visibly distinct;
+  the plots retain outliers rather than clipping them.
+- Deterministic tests were added first and intentionally failed during import
+  before the functions existed. The final parameter-sweep selection passed
+  6/6, Ruff and whitespace checks passed, and the existing mathematical PDF
+  built successfully. No estimator, controller, archive value, or simulation
+  behavior changed.
+
+## Proposed-method parameter-sensitivity sweep milestone
+
+- Added `evaluation/multifidelity_parameter_sweep.py` and
+  `evaluation/run_multifidelity_parameter_sweep.py`, production and smoke YAML
+  configurations, deterministic tests, a standalone milestone plotter, and the
+  real-output visual `docs/assets/multifidelity_parameter_sweep_milestone.png`.
+- Tests were written first; the intentional red run failed at collection with
+  `ModuleNotFoundError`. During implementation, the resolved-condition contract
+  exposed that a placeholder base composition would make conditions differ in
+  more than one factor. The resolver now constructs every condition from the
+  six explicitly declared reference levels, preserving a true one-factor-at-a-
+  time design.
+- Production levels are 30/50/70-m square environments; A1/G9, A2/G8, and
+  A5/G5 teams; 10/30/60-s missions; 0/5/15 radius-1 obstacles; short,
+  reference, and dynamically diagonal-covering ranges; and matched low,
+  reference, and high LOW/HIGH sensor and GP noise variances. All values remain
+  declarative and may be revised before publication runs.
+- The full-environment range is resolved as $\sqrt{W^2+H^2}$ for both robot
+  types and archives the diagonal-coverage check. This removes only the range
+  restriction: obstacle line of sight remains active.
+- Each condition receives a resolved YAML, proposed-method raw archive,
+  separate evaluated archive, and manifest entry. Evaluation reports final and
+  held-last time-averaged posterior and coverage metrics. Factor plots show
+  episode values with bootstrap 95% mean intervals. `--reuse-raw` regenerates
+  evaluation and figures without rerunning simulation.
+- The smoke run completed all 12 conditions (two levels for each factor) and
+  generated six factor plots. The inspected sensing-range milestone PNG is
+  2360-by-1316 pixels and is generated from those real archives. These smoke
+  outputs verify plumbing only and are not scientific conclusions.
+- Validation: the five new direct tests passed; the relevant 32-test selection
+  passed; Ruff and Python compilation passed; and the full suite reported 322
+  passed with the same four known unrelated failures (canonical step count,
+  ground trajectory color, canonical/ablation FOV mismatch, and progress text).
+  The mathematical reference built successfully as a 25-page PDF, retaining
+  only its existing layout warnings. No numerical or behavioral regression was
+  found outside the deliberately varied conditions.
+- The production repeated-episode study was not run because of its cost. The
+  Zhang timing/convergence pilot and all baseline comparisons remain deferred,
+  as requested. Documentation changed in `README.md`,
+  `docs/multifidelity_config_reference.md`, both mathematical references,
+  `docs/reviewer_revision_progress.md`, and this file.
+
+## Obstacle-aware line-of-sight sampling milestone
+
+- Files changed: `src/core/obstacles.py`, `src/models/sensors.py`,
+  `src/simulation.py`, `tests/test_circular_ground_obstacles.py`,
+  `tests/test_multifidelity_sensors.py`, new
+  `tests/test_line_of_sight_sampling_plot.py`, new
+  `examples/plot_line_of_sight_sampling_milestone.py`, new real-output
+  `docs/assets/line_of_sight_sampling_milestone.png`, `README.md`,
+  `docs/multifidelity_config_reference.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`,
+  `docs/reviewer_revision_progress.md`, and this status file.
+- Deterministic tests were added before production code. Their intentional red
+  run failed during collection because `line_of_sight_is_clear` did not exist.
+  The first implementation run then exposed one over-strong assertion that
+  assumed every single-attempt random draw would cross a wall; it was narrowed
+  to the actual contract that returned samples are visible and exhausted
+  retries never create a blocked fallback.
+- An occupied raster cell is treated as a closed unit square centred at its
+  raster coordinate. LOS uses a deterministic segment--closed-square slab
+  intersection, so direct intersections, occupied endpoints, and tangent or
+  boundary contact are blocked. Invalid out-of-map endpoints fail explicitly.
+- Every requested sample retains the existing area-uniform sector proposal.
+  Out-of-bounds and occluded proposals are rejection-sampled up to the existing
+  attempt limit. A failed opportunity returns no observation, so a collection
+  event can submit fewer than the configured count or an empty batch. Noise is
+  generated only after visibility succeeds.
+- The coupled builder supplies the shared ground occupancy raster to both the
+  LOW aerial and HIGH ground sensors. This exact 2-D model treats ground
+  obstacles as vertically occluding aerial measurements even though aerial
+  motion may overfly them. Obstacle-free maps bypass LOS work and a regression
+  contract proves that they preserve the original deterministic sensor stream.
+- The real-output visual contains the production sensor's accepted samples and
+  fixed probes classified by the production LOS predicate. The inspected PNG
+  is 1296-by-1007 and clearly separates visible and occluded rays around an
+  L-shaped raster obstacle.
+- Commands executed included the intentional red focused tests; repeated
+  focused geometry/sensor/scheduler/feedback/legacy selections; Ruff format
+  and lint; Python compilation; the four-step obstacle-aware multi-fidelity
+  smoke run; deterministic figure generation and original-resolution visual
+  inspection; the full test suite; an out-of-tree two-pass LaTeX build; and
+  changed-file whitespace checks.
+- The final relevant selection passed 75/75. The full suite run immediately
+  before the final focused empty-batch contract collected 320 tests: 316
+  passed, with exactly the same four unrelated failures as the previous
+  milestone (canonical config step expectation, ground trajectory color,
+  ablation/canonical configuration mismatch, and progress posterior-version
+  text). The final empty-batch contract passed in the focused selection. The
+  mathematical reference built successfully as a 25-page PDF with its
+  pre-existing underfull/overfull equation-to-code table warnings.
+- Intended behavioral change: obstacle-containing scenarios may submit fewer
+  samples and consequently produce different posteriors, controller targets,
+  and trajectories. Numerical or behavioral regressions on obstacle-free
+  sensor streams: none. No GP equation, controller law, robot motion model,
+  evaluation metric, or legacy estimator behavior changed.
+
+## Illustrative observation-resolution figure milestone
+
+- Files changed: new `examples/plot_observation_resolution.py`, new
+  `tests/test_observation_resolution_plot.py`, `README.md`, the generated vector
+  assets `paper/pics/aerial_observation.pdf` and
+  `paper/pics/ground_observation.pdf`, plus the wider vector assets
+  `paper/pics/density_estimate.pdf` and `paper/pics/mfgp_uncertainty.pdf`; the
+  generated previews
+  `docs/assets/aerial_observation_milestone.png` and
+  `docs/assets/ground_observation_milestone.png`, plus
+  `docs/assets/density_estimate_milestone.png` and
+  `docs/assets/mfgp_uncertainty_milestone.png`; and this status file. The
+  superseded combined PDF and preview were removed.
+- The figure compares one 10-by-10-meter footprint sampled at
+  $\Delta_a=1.0$ m and $\Delta_g=0.1$ m. The resulting 10-by-10 aerial grid and
+  100-by-100 ground grid are saved as separate square files and use the same
+  domain, `YlOrRd` colormap, and color normalization. Each contains only its
+  heatmap: titles, labels, axes, ticks, cell outlines, annotations, and colorbar
+  are absent. The underlying field is a single isotropic Gaussian
+  peak, ready for later composition beside a wider-domain MFGP estimate.
+- The additional 30-by-20-meter illustrative full-domain estimate uses the
+  same peak inside a 5-meter-radius circular observation footprint and smoothly
+  blends to intermediate prior-like values elsewhere. Its matching normalized
+  uncertainty is low over the observed disk and high over the unexplored
+  domain. With the `Greys` colormap, this deliberately renders observed space
+  bright and unexplored space dark. Both wider maps are also bare heatmaps.
+- The observed-to-unexplored transition now uses radial Gaussian decay outside
+  the circular footprint, with a fade length equal to 30% of the original
+  10-meter observation extent. Observation weight remains one inside the disk
+  and decays smoothly outside it; both density estimate and uncertainty use
+  this same envelope.
+- Deterministic tests were added first. Their initial collection failed because
+  the plotting module did not exist. The separate-file/single-peak revision was
+  also observed failing against the combined multi-feature implementation.
+  After implementation, all ten focused contracts passed. They verify the
+  single symmetric peak, grid dimensions, the 100-to-1 sample-count ratio,
+  common physical extent, input validation, absence of non-heatmap decoration,
+  exact colormaps, shared color limits, full-domain array dimensions, observed
+  versus unexplored mean/uncertainty behavior, circular radial symmetry,
+  bounded per-cell transition steps, broad transition support, and creation of
+  all four files.
+- Commands executed: `.venv/bin/python -m pytest -q
+  tests/test_observation_resolution_plot.py`; the final relevant selection with
+  `tests/test_multifidelity_sensors.py`; `.venv/bin/python
+  examples/plot_observation_resolution.py`; the same plot command with separate
+  `--aerial-output`, `--ground-output`, `--estimate-output`, and
+  `--uncertainty-output` preview paths; `file`/`pdfinfo` artifact inspection;
+  and original-resolution visual inspection of both 1065-by-1065 observation
+  previews and both 1597-by-1065 wider previews. The final relevant selection
+  passed 20/20; Ruff lint and formatting, Python compilation, and changed-file
+  whitespace checks also passed.
+- No simulation data are represented, and no estimator, sensor implementation,
+  field transform, controller, coverage law, motion model, discretization,
+  scheduler, or metric changed. The illustration uses configured resolution
+  values only, so `docs/mathematical_formulation.md` remains current. Numerical
+  and behavioral regressions: none.
+
+## Experimental-figure caption milestone
+
+- Files changed: `paper/updated.tex` and this status file.
+- Figure 2 now identifies all three team compositions, the three reconstruction
+  metrics and their direction, the 30 paired episodes, and the bootstrap 95%
+  confidence bands.
+- Figure 3 now identifies all four paired A3/G7 conditions, distinguishes the
+  finite-range and full-visibility assumptions, defines the direction of
+  coverage effectiveness and locational cost, and states the mean and paired
+  bootstrap confidence-band semantics.
+- Figure 4 now explains the shared grayscale target density, aerial and ground
+  trajectory styles, initial and final markers, and final sensing-footprint
+  outlines.
+- Validation commands: `latexmk -pdf -interaction=nonstopmode -halt-on-error
+  updated.tex` from `paper/`; `pdftoppm -png -r 150 -f 7 -l 8 updated.pdf
+  /tmp/ral-caption-paper`; original-resolution inspection of both rendered
+  evaluation pages; caption-placeholder, PDF-text, and whitespace checks.
+- Validation result: the two-pass paper build succeeded and produced a
+  nine-page PDF. Figures 2--4, their captions, and their cross-references are
+  readable and unclipped. No code tests were run because this milestone changes
+  only prose in the paper and status document. The build retains the existing
+  missing-author, package, underfull-box, and undefined `da fare` reference
+  warnings.
+- This is a paper-only documentation change. No estimator, field transform,
+  sensor distribution, controller, coverage law, motion model, discretization,
+  scheduler, evaluation metric, numerical result, or figure asset changed, so
+  `docs/mathematical_formulation.md` remains current.
+
+## Optional four-condition trajectory milestone
+
+- Files changed: new `evaluation/plot_four_method_trajectories.py`;
+  `evaluation/run_four_method_comparison_pipeline.py`,
+  `tests/test_four_method_comparison_pipeline.py`, `README.md`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/architecture/implementation_three_method_comparison.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`, `.gitignore`; new real-output
+  `docs/assets/four_method_trajectory_milestone.png`; and this status file.
+- The deterministic contract was changed before production code. Its red run
+  failed because `FourMethodComparisonArtifacts` had no trajectory field. After
+  implementation, the focused four-condition selection passed `3/3`; the
+  broader Egerstedt/four-condition/three-method/Zhang compatibility selection
+  passed `22/22`.
+- `--episode` is optional and zero-based. Omitting it returns
+  `trajectory_plot=None` and creates no trajectory file. Supplying index $N$
+  writes `plots/trajectories_episode_NNN.png`. Invalid negative, Boolean, or
+  out-of-archive indices fail explicitly. `--reuse-raw --episode N` evaluates
+  and plots saved archives without rerunning any controller.
+- The standalone plotter reloads all four raw archives and revalidates every
+  scenario-contract array and recorded/recomputed fingerprint. It also requires
+  same-range Egerstedt-LR, domain-covering Egerstedt full-range, and standard
+  full-cell Zhang metadata before rendering.
+- The two-by-two figure uses one hidden-truth density and color scale for all
+  panels. It plots class-consistent aerial/ground paths, initial and final
+  states, limited aerial disks, final ground footprints, dynamically archived
+  range labels, and Zhang's Algorithm 2 transition. Episode index, seed, and
+  fingerprint prefix are recorded in the title. Full-range Egerstedt's radius
+  75 disk is omitted because it exceeds the complete plotted domain; its value
+  remains explicit in the panel title.
+- The real visual used episode 0, seed 42, from a valid shared five-episode,
+  300-step archive with radius 10 and fingerprint `2bb850380184...`.
+  `docs/assets/four_method_trajectory_milestone.png` was inspected at its
+  original 2062-by-1856 resolution. Plotting did not mutate the raw archives.
+- This milestone changes no estimator, field transform, sensor distribution,
+  controller, coverage law, motion model, numerical discretization, scheduler,
+  or evaluation metric. The mathematical equations are unchanged; only the
+  equation-to-code map now includes the optional plotter.
+- Commands executed included the red and green contract tests, Ruff format and
+  lint, the real `--reuse-raw --episode 0` pipeline, standalone milestone plot
+  generation, original-resolution image inspection, archive provenance checks,
+  broader compatibility tests, Python compilation, `git diff --check`, the
+  full suite, and a forced LaTeX build. The mathematical reference remains 25
+  pages with the existing stream, glue, and table-width warnings.
+- The full suite collected 275 tests: `271` passed, with exactly the same four
+  unrelated failures as before (canonical config step expectation, ground
+  trajectory color, ablation ground FOV, and progress posterior-version text).
+  Numerical and behavioral regressions: none; this is a read-only plotting path
+  over already saved trajectories.
+
+## Final four-condition comparison milestone
+
+- Files changed: `configs/baseline_comparison_a3_g7.yaml`,
+  `evaluation/comparison_io.py`, `evaluation/run_egerstedt_comparison.py`; new
+  `evaluation/evaluate_four_method_comparison.py`,
+  `evaluation/plot_four_method_comparison.py`,
+  `evaluation/run_four_method_comparison_pipeline.py`, and
+  `tests/test_four_method_comparison_pipeline.py`; expanded
+  `tests/test_egerstedt_comparison_runner.py`; new real-output visual
+  `docs/assets/four_method_comparison_milestone.png`; plus `README.md`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/architecture/implementation_three_method_comparison.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`, `.gitignore`, and this status
+  file.
+- Deterministic tests were added first. The intentional red collection failed
+  because the four-method archive identity did not exist. After implementation,
+  the focused Egerstedt/four-condition selection passed `6/6`; the broader
+  new/three-method/Zhang compatibility selection passed `22/22`.
+- The proposed-method scenario and Egerstedt-LR use aerial radius 10.
+  Full-range Egerstedt uses an effective controller override of 75, which
+  exceeds the query-domain diagonal `70.710678`. Standard Zhang retains complete
+  LOW-field power cells. Both Egerstedt conditions retain oracle truth-density
+  access and are labelled accordingly.
+- The Egerstedt runner now preserves the scenario-contract
+  `aerial_sensing_range` unchanged and archives the actual controller value as
+  `effective_aerial_sensing_range`. Metadata records scenario/effective ranges,
+  whether an override occurred, the domain diagonal, and whether that radius
+  covers the complete domain. The omission default remains backward compatible.
+- The four-condition evaluator requires exact equality of every scenario array
+  and fingerprint, same-range Egerstedt-LR, domain-covering full Egerstedt, and
+  standard `full_cell` Zhang. It computes footprint-normalized ground coverage
+  and truth-weighted nearest-ground locational cost, their final/time-average
+  values, and shared-index paired-bootstrap 95% intervals. It fabricates no
+  posterior metric for a baseline.
+- The pipeline emits four independent raw archives, one evaluated archive, and
+  only `plots/coverage_locational_cost.png`. The plot is a one-by-two history
+  figure with dynamically archived radius labels; no trajectory, runtime,
+  travel, reconstruction, or phase panel is produced.
+- The first production-duration validation exposed that the base A3/G7 file had
+  been set to radius 75: both Egerstedt conditions were identical. Those outputs
+  were rejected. A new publication-contract test failed intentionally on that
+  setting; the base radius was restored to 10, the test passed, and the complete
+  300-step run was regenerated before any result was accepted.
+- The valid deterministic A3/G7 run used seed 42, 300 steps at 0.1 seconds, and
+  fingerprint `a8eff4a2571a...`. Effective aerial ranges were `[10, 10, 75,
+  full-cell]`. Maximum limited/full Egerstedt aerial and ground path differences
+  were `25.192459` and `30.231697`, confirming a behavioral rather than metadata
+  change.
+- Valid single-episode final footprint-normalized coverage was `0.556577`,
+  `0.000363`, `0.854806`, and `0.154819` for proposed-LR, Egerstedt-LR,
+  Egerstedt-full, and Zhang-full. Corresponding final locational costs were
+  `35.359655`, `576.422556`, `26.515176`, and `156.238443`. Time-average
+  coverage was `0.217912`, `0.000168`, `0.516103`, and `0.025067`; time-average
+  cost was `350.073170`, `769.783224`, `162.027111`, and `1040.926796`. These
+  validate the implementation and are not multi-episode statistical claims.
+- The inspected real-output figure
+  `docs/assets/four_method_comparison_milestone.png` is 2396-by-920 and contains
+  exactly the requested coverage and locational-cost panels. With one validation
+  episode the confidence bounds coincide with the means; the documented
+  publication command runs 30 paired episodes.
+- Commands executed included intentional red and green tests, the invalid and
+  corrected complete 300-step runs, archive/fingerprint/range/path-difference
+  inspection, real-figure regeneration and original-resolution inspection,
+  focused and compatibility tests, Ruff format and lint, Python compilation,
+  `git diff --check`, the full suite, and a forced two-pass LaTeX build. The
+  mathematical reference builds as 25 pages; existing stream, glue, and
+  table-width warnings remain.
+- The full suite collected 275 tests: `271` passed, with exactly the same four
+  unrelated failures as before (canonical config step expectation, ground
+  trajectory color, ablation ground FOV, and progress posterior-version text).
+  Numerical and behavioral regressions: none in the existing three-method,
+  Zhang-LR, direct Zhang, standalone Zhang, proposed estimator/controller, or
+  default Egerstedt paths.
+
+## Direct standard-Zhang versus Zhang-LR comparison milestone
+
+- Files changed: `evaluation/comparison_io.py`; new
+  `evaluation/evaluate_zhang_variant_comparison.py`,
+  `evaluation/plot_zhang_variant_comparison.py`,
+  `evaluation/run_zhang_variant_comparison.py`,
+  `tests/test_zhang_variant_comparison.py`, and
+  `docs/assets/zhang_variant_comparison_milestone.png`; plus `README.md`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/architecture/implementation_three_method_comparison.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`, `.gitignore`, and this status
+  file.
+- Tests were written before the new production modules. The intentional red
+  collection failed because the evaluated-archive kind did not exist. The
+  first implementation run then exposed an over-strong smoke assertion: eight
+  steps make the aerial policies differ, but are too short for their raster
+  assignments and ground paths necessarily to differ. The corrected contract
+  requires the aerial difference and treats delayed ground divergence as a
+  reported metric. The focused new tests passed `2/2`; the broader
+  Zhang/Egerstedt/evaluator/plot selection passed `25/25`.
+- `evaluation/run_zhang_variant_comparison.py` generates one scenario archive
+  or accepts `--scenario PATH`, passes it unchanged to the full-cell and
+  finite-range configurations, evaluates, and plots. The evaluator rejects
+  method-label, fingerprint, scenario-array, and result-shape mismatches.
+- The evaluated archive contains per-robot aerial and ground Euclidean
+  differences, first-divergence times at threshold $10^{-10}$, standard and LR
+  cell support, consensus target masses and loads, final and time-average
+  coverage and locational cost, cumulative class travel, and transition times.
+  No fabricated posterior metric is assigned to either Zhang variant.
+- The deterministic real A3/G7 run used seed 42, 300 steps at 0.1 seconds,
+  scenario fingerprint `a8eff4a2571a...`, and the physical aerial radius 10.
+  Both variants entered Algorithm 2 at 18.4 seconds. Aerial paths first differed
+  at 18.5 seconds and ground paths at 18.6 seconds; their final maximum
+  per-robot differences were `2.800114` and `3.174696`, respectively.
+- Zhang-LR's minimum and episode-mean cell support were `0.053148` and
+  `0.397249`. Standard target masses were `[0.347852, 0.341337, 0.532747]`,
+  compared with `[0.101132, 0.071969, 0.263460]` for Zhang-LR. Final normalized
+  ground coverage was `0.154819` versus `0.135384`; time-average coverage was
+  `0.025067` versus `0.020479`. Final locational cost was `156.238443` versus
+  `170.021073`. These are deterministic single-episode validation values, not
+  statistical claims.
+- The inspected real-output visual
+  `docs/assets/zhang_variant_comparison_milestone.png` is 2864-by-1676. It shows
+  both trajectory sets, LR sensing disks, aerial/ground path divergence,
+  minimum/mean support, target-mass changes, and direct coverage histories.
+- Commands executed included the red and focused tests, the complete one-command
+  300-step comparison, standalone plot regeneration, archive metric extraction,
+  original-resolution image inspection, the broader regression selection,
+  Ruff format and lint, Python compilation, `git diff --check`, the full suite,
+  and a forced two-pass LaTeX build. The mathematical reference remains 24
+  pages; existing stream, glue, and table-width warnings remain.
+- The full suite collected 271 tests: `267` passed, with exactly the same four
+  unrelated failures as the prior milestone (canonical config step
+  expectation, ground trajectory color, ablation ground FOV, and progress
+  posterior-version text). Numerical and behavioral regressions: none in the
+  standard Zhang, Zhang-LR, proposed multi-fidelity, or Egerstedt controllers;
+  this milestone adds paired orchestration, offline metrics, and plotting only.
+
+## Zhang-LR finite-aerial-range milestone
+
+- Files changed: `evaluation/zhang.py`,
+  `evaluation/run_zhang_comparison.py`,
+  `evaluation/evaluate_three_method_comparison.py`,
+  `evaluation/plot_three_method_comparison.py`, new
+  `configs/zhang_lr_comparison.yaml`, new
+  `configs/zhang_lr_comparison_smoke.yaml`,
+  `tests/test_zhang_baseline.py`,
+  `tests/test_three_method_comparison_pipeline.py`, new
+  `examples/plot_zhang_lr_milestone.py`, `README.md`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/architecture/implementation_three_method_comparison.md`,
+  `docs/multifidelity_config_reference.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`, new real-output figures under
+  `docs/assets/zhang_lr_milestone/`, `.gitignore`, and this status file.
+- Tests were added before production changes. The intentional red selection
+  failed twice: `ZhangParameters` did not accept an aerial range and the
+  Zhang-LR paired configuration did not exist. After implementation, the
+  core/paired/pipeline Zhang selection passed `13/13`; the broader relevant
+  Zhang/Egerstedt/evaluator/plotter selection passed `23/23`.
+- `algorithm.aerial_sensing_mode: full_cell` is the omission default and keeps
+  the original Zhang equations. `limited` selects Zhang-LR and reads the exact
+  physical aerial sensing range saved by the proposed-method scenario archive.
+  The range is transformed with the existing isotropic 3-by-3 coordinate map.
+- Zhang-LR leaves Algorithm 1 geometric deployment, load consensus, mission
+  timing, ground sensing, and ground control unchanged. Its LOW-field cell
+  masses use the rasterized intersection between each power cell and its
+  aerial sensing disk. Shared boundary-face information contributes separately
+  to each incident aerial command only when that face midpoint is inside that
+  robot's disk.
+- Each state archives the quadrature-area support fraction of every complete
+  power cell inside its sensing disk. Metadata identifies the method as
+  `zhang_lr`, records both physical and normalized radii, and explicitly marks
+  the extension as not paper-faithful. The evaluator propagates the diagnostic;
+  aggregate and trajectory figures label Zhang-LR, plot support histories, and
+  draw final aerial sensing disks.
+- The deterministic real run used the production A3/G7 scenario, 300 steps,
+  and physical aerial radius 10 (normalized radius 0.6). Algorithm 2 still
+  began at 18.4 seconds. The minimum cell support over the episode was
+  `0.053148`, final mean support was `0.378521`, and final normalized ground
+  coverage was `0.135384`. The corresponding original full-cell Zhang result
+  was `0.154819`; these single-episode values validate behavior and are not
+  statistical claims.
+- Real implementation outputs were inspected at original resolution:
+  `docs/assets/zhang_lr_milestone/metrics.png` is 2756-by-1568 and includes the
+  minimum/mean support histories; `trajectories_episode_000.png` is 2928-by-992
+  and shows the radius-10 aerial disks, common truth, and all three paired
+  trajectories.
+- Commands executed included the intentional red tests, focused green tests,
+  the complete 300-step milestone pipeline, image inspection, Ruff format and
+  lint checks, Python compilation, `git diff --check`, the full test suite, and
+  a forced two-pass LaTeX build. The mathematical reference now builds as 24
+  pages; existing stream, glue, and table-width warnings remain.
+- The full suite collected 269 tests: `265` passed, with only the same four
+  unrelated failures (canonical config step expectation, ground trajectory
+  color, ablation ground FOV, and progress posterior-version text).
+- Numerical and behavioral regressions: none in omitted/`full_cell` Zhang,
+  standalone Zhang, proposed multi-fidelity, or Egerstedt paths. Zhang-LR
+  intentionally changes sensed masses, target masses, boundary commands,
+  aerial and ground trajectories, coverage, and runtime. Its outputs must not
+  be reported as the original Zhang et al. method.
+
+## Thirty-second paired-mission horizon update
+
+- The user extended `configs/baseline_comparison_a3_g7.yaml` from 200 to 300
+  integration steps. With the unchanged 0.1-second step, every proposed,
+  Egerstedt, and Zhang episode now has the common physical horizon
+  $T=K\Delta t=30$ seconds.
+- Files updated for the new contract: `README.md`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/architecture/implementation_three_method_comparison.md`,
+  `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`,
+  `tests/test_three_method_comparison_pipeline.py`,
+  `examples/plot_three_method_comparison_milestone.py`, the two real-output
+  figures under `docs/assets/three_method_comparison_milestone/`, and this
+  status file. No controller, estimator, baseline, scheduler, or metric code
+  changed.
+- The production-contract test now requires exactly 300 steps and 30 seconds.
+  The focused comparison selection passed `22/22`; Ruff format and lint checks,
+  Python compilation, and `git diff --check` passed.
+- The deterministic one-episode production run was repeated for all 300 steps.
+  Zhang's deployment transition remained 18.4 seconds, so Algorithm 2 now gets
+  11.6 seconds instead of 1.6 seconds. The regenerated trajectory figure shows
+  the materially longer ground paths, and the metrics figure spans the complete
+  30-second clock. Both figures were inspected at 2928-by-992 and 2756-by-1568,
+  respectively.
+- In this validation episode, final normalized coverage was `0.556577`,
+  `0.000363`, and `0.154819` for proposed, Egerstedt, and Zhang; corresponding
+  time averages were `0.217912`, `0.000168`, and `0.025067`. These values
+  replace the obsolete 20-second milestone observations and are not population
+  claims.
+- A forced LaTeX build produced the 23-page mathematical reference. The full
+  suite collected 266 tests: `262` passed, and only the same four unrelated
+  failures remain (canonical config step expectation, ground trajectory color,
+  ablation ground FOV, and progress posterior-version text).
+- Numerical and behavioral regressions: the extended horizon intentionally
+  changes final/time-averaged metrics, travel, trajectories, runtime, posterior
+  history length, and Zhang's usable Algorithm 2 duration. Pairing, initial
+  conditions, controller equations, sensing policy, and estimators are
+  unchanged. Raw 20-second archives must not be reused as 30-second results.
+
+## Paired A3/G7 three-method baseline-comparison milestone
+
+- Files changed: `evaluation/zhang.py`, `evaluation/comparison_io.py`, new
+  `evaluation/run_zhang_comparison.py`, new
+  `evaluation/evaluate_three_method_comparison.py`, new
+  `evaluation/plot_three_method_comparison.py`, new
+  `evaluation/run_baseline_comparison_pipeline.py`, new
+  `configs/baseline_comparison_a3_g7.yaml`, new
+  `configs/zhang_comparison.yaml`, new
+  `configs/zhang_comparison_smoke.yaml`, new
+  `tests/test_three_method_comparison_pipeline.py`, new
+  `examples/plot_three_method_comparison_milestone.py`, new
+  `docs/architecture/implementation_three_method_comparison.md`, `README.md`,
+  `docs/experimental_evaluation_plan.md`, `docs/mathematical_formulation.md`,
+  `docs/latex/mathematical_formulation.tex`, new real-output figures under
+  `docs/assets/three_method_comparison_milestone/`, `.gitignore`, and this
+  status file.
+- The production protocol fixes ten robots as A3/G7, 300 steps at 0.1 seconds,
+  no obstacles, common corner initial states, a 360-degree radius-5 ground
+  footprint, and decentralized aerial HEDAC for the proposed method. The
+  proposed archive is the immutable scenario contract: both baselines verify
+  its fingerprint and reuse its exact seeds, state times, initial positions,
+  truth fields, domain, and sensing radius.
+- The paired Zhang adapter maps the physical square affinely to the paper's
+  3-by-3 coordinates. Algorithm 1 aerial deployment starts at mission time
+  zero and holds all ground states fixed. On convergence, distributed load and
+  mass consensus executes without advancing physical time, while its measured
+  duration remains part of wall runtime. Algorithm 2 receives only the time
+  left before the common 30-second horizon. The standalone Zhang runner keeps
+  its predeployment behavior for backward compatibility.
+- The normalized raster spacing is about 0.061, so the paired configuration
+  declares a 0.02 deployment residual tolerance rather than relying on
+  sub-grid centroid changes. Its theorem-compliant consensus gain is
+  `0.5 * min_i(s_i / degree_i)` and is recorded in the raw archive.
+- Tests were written before production integration. The intentional red run
+  failed for the missing three-method archive constants and runner/pipeline
+  modules. After implementation, the focused Zhang, comparison-runner,
+  evaluator, and plotter selection passed `22/22`.
+- The one-command real validation used the production A3/G7 configuration for
+  one deterministic 300-step episode. Zhang transitioned at 18.4 seconds, so
+  its ground team was stationary for 184 steps and Algorithm 2 received 11.6
+  seconds, or 116 integration intervals, before the common deadline.
+- On that validation episode, final footprint-normalized coverage was
+  `0.556577` for proposed multi-fidelity, `0.000363` for Egerstedt, and
+  `0.154819` for Zhang. Time-averaged values were `0.217912`, `0.000168`, and
+  `0.025067`; final nearest-ground locational costs were `35.3597`, `576.423`,
+  and `156.238`. Final accumulated ground travel was `323.156`, `790.370`, and
+  `119.056`, respectively. These are validation observations, not statistical
+  claims;
+  the publication default remains 30 episodes with paired bootstrap intervals.
+- The common evaluator reports coverage histories, final and time-averaged
+  coverage, locational cost, aerial and ground travel, complete controller-step
+  wall runtime, bootstrap 95% intervals, and paired coverage differences.
+  Reconstruction and calibration are explicitly `N/A` for both literature
+  baselines because they do not natively publish a probabilistic HIGH-field
+  posterior.
+- Deterministic real-output figures were regenerated and visually inspected:
+  `docs/assets/three_method_comparison_milestone/metrics.png` is 2756-by-1568,
+  and `trajectories_episode_000.png` is 2928-by-992. They show common truth and
+  axes, class-consistent trajectories and footprints, the Zhang transition,
+  coverage/cost/travel histories, runtime scope, and confidence summaries.
+- Commands executed included Ruff format/lint, the real one-episode pipeline
+  through the milestone script, the focused 22-test selection, the complete
+  test suite, image inspection, Python compilation and diff checks, and a
+  forced `latexmk` PDF build. The full suite collected 266 tests: `262` passed,
+  with only the four previously documented unrelated failures (canonical 200
+  versus expected 300 steps, cyan versus expected orange ground trajectory
+  color, ablation 90-degree versus expected 360-degree ground FOV, and missing
+  `posterior_version=` progress text).
+- Mathematical documentation now distinguishes the continuous paper model,
+  raster quadrature, the paired affine coordinate transform, the full mission
+  clock and phase transition, the adaptive consensus gain, and every common
+  metric. The LaTeX reference built a 23-page PDF; existing stream, glue, and
+  table-width warnings remain.
+- Numerical and behavioral regressions: none in the proposed, Egerstedt, or
+  standalone Zhang runners. The paired Zhang adapter is new and intentionally
+  differs from standalone predeployment by charging deployment to the mission
+  horizon. A one-episode comparison is insufficient for method ranking; use
+  the default 30 paired episodes for reported results.
+
+## Decentralized easy-only scenario-pipeline milestone
+
+- Files changed: `evaluation/run_multifidelity_scenario_pipeline.py`,
+  `evaluation/run_multifidelity_composition.py`,
+  `evaluation/evaluate_multifidelity_composition.py`,
+  `evaluation/plot_multifidelity_scenario_comparison.py`,
+  `tests/test_multifidelity_scenario_pipeline.py`, `README.md`,
+  `docs/experimental_evaluation_plan.md`,
+  `docs/architecture/scenario_comparison_design.md`,
+  `docs/architecture/implementation_composition_sweep.md`,
+  `docs/multifidelity_config_reference.md`, the real pipeline artifacts under
+  `output/multifidelity_decentralized_easy_pipeline_smoke`, and this status
+  file.
+- Omitting a selector resolves `composition_sweep.default_scenario`, which is
+  `easy_long` in both composition configurations. `--scenario NAME` explicitly
+  selects one declaration and `--all-scenarios` restores the prior two-scenario
+  behavior. A cross-scenario plot is emitted only when exactly two scenarios
+  are selected, and the result's comparison path is otherwise `None`.
+- Raw archives now record the normalized aerial controller mode, neighbor
+  weighting, and communication range. The evaluator propagates this protocol,
+  and the cross-scenario plotter rejects mismatched controller policies.
+- Tests were changed before production code. The intentional red pipeline run
+  produced `3` failures for missing CLI options, the old both-scenario default,
+  and the missing API flag. After implementation, the scenario, composition,
+  and trajectory selection passed `29/29`.
+- The default deterministic smoke command ran without `--scenario` or
+  `--all-scenarios`, produced only `easy_long` artifacts, and recorded
+  decentralized/hard/range-3 controller metadata in both archives. Its metric
+  and A1/G1 trajectory/reconstruction figures were inspected from real output.
+- Commands executed include the red and green pipeline test selections and the
+  default `evaluation/run_multifidelity_scenario_pipeline.py` smoke command
+  with one episode, ten bootstrap samples, and no progress display.
+- Final validation: Ruff lint and formatting checks passed, Python compilation
+  passed, and `git diff --check` passed. The full suite collected 256 tests:
+  `252` passed and the four previously documented unrelated expectations remain
+  (canonical 200 versus expected 300 steps, cyan versus expected orange ground
+  trajectory color, ablation 90-degree versus expected 360-degree ground FOV,
+  and missing `posterior_version=` progress text). The approved
+  `./scripts/validate.sh` command could not be run because that file is absent
+  from this checkout.
+- Mathematical documentation: estimator, controller, sensor, dynamics,
+  scheduler, and metric equations are unchanged in this orchestration
+  milestone. The decentralized controller equations were documented in the two
+  preceding milestones.
+- Numerical and behavioral regressions: default scenario-pipeline runtime and
+  output count decrease because `hard_short` is no longer implicit. Explicit
+  `--all-scenarios` reproduces the selection topology of the old pipeline. Raw
+  archives made with centralized coverage must not be reused as decentralized
+  results.
+
+## Decentralized aerial-controller integration milestone
+
+- Files changed: `src/coupled_simulation.py`,
+  `configs/multifidelity_composition.yaml`,
+  `configs/multifidelity_composition_smoke.yaml`,
+  `tests/test_decentralized_hedac.py`,
+  `tests/test_aerial_multifidelity_feedback.py`, new
+  `docs/architecture/implementation_decentralized_aerial_control.md`,
+  `docs/multifidelity_config_reference.md`, new
+  `docs/assets/decentralized_multifidelity_easy_milestone.png`, and this status
+  file.
+- `aerial.ergodic_control.mode` is an independent controller selector with
+  `centralized` as the omission default and `decentralized` as the composition
+  protocol choice. Unknown modes fail before the simulation is constructed.
+- The coupled schedule and estimator are unchanged: LOW collection precedes
+  aerial motion, all local aerial controllers consume one cached central HIGH
+  target, and HIGH collection/update follows aerial motion. The inherited
+  legacy GP is not updated in multifidelity mode, and no local state owns a GP.
+- Tests were added before builder changes. The intentional red integration run
+  had `2` failures because the builder ignored both the decentralized and
+  invalid mode values, while `12` mathematical and causal tests passed. After
+  integration, the expanded controller/scheduler/ground-feedback selection
+  passed `34/34`.
+- The deterministic ground-observation causal test verifies a changed HIGH
+  posterior mean, changed cached aerial target, changed local heat, and changed
+  real Dubins trajectory. It therefore preserves the required ground-to-aerial
+  closed-loop effect under decentralized control.
+- Real integrated output used the smoke composition configuration, one
+  `easy_long` episode, 12 steps, and the A1/G1 trajectory selection. It
+  published six central posterior versions and produced the inspected
+  trajectory/truth/reconstruction/error figure
+  `docs/assets/decentralized_multifidelity_easy_milestone.png`.
+- Commands executed: the focused `34`-test selection, the single-scenario smoke
+  composition runner, and the existing real-archive trajectory plotter with
+  `MPLCONFIGDIR=/tmp/ral_marta_mpl`.
+- Numerical and behavioral regressions: the composition configuration's aerial
+  trajectories and therefore later LOW observations, posterior fits, runtime,
+  and metrics intentionally change. Existing raw composition archives must not
+  be reused for this protocol. Configurations omitting the new selector retain
+  centralized trajectories.
+
+## Decentralized aerial-HEDAC core milestone
+
+- Files changed: new `src/core/decentralized_hedac.py`, reusable optional-field
+  seams in `src/core/hedac.py`, new `tests/test_decentralized_hedac.py`, new
+  `examples/plot_decentralized_hedac_core_milestone.py`,
+  `docs/mathematical_formulation.md`, new
+  `docs/assets/decentralized_hedac_core_milestone.png`, and this status file.
+- Each aerial robot maintains only its own time-averaged raster footprint and
+  heat field. A fresh Euclidean range graph is built from pre-motion snapshots;
+  only current neighbors contribute through a hard spatial support of the same
+  configured radius. Same-step snapshots and command batching make the
+  implementation deterministic and independent of in-loop robot motion.
+- The class inherits one legacy-compatibility GP from `HEDACAlgorithm`; it does
+  not construct a GP per robot. In multifidelity use the simulation-owned
+  central estimator remains the sole estimator and supplies one cached HIGH
+  target to the local controllers.
+- Tests were added before production code. The intentional red run failed at
+  collection because `src.core.decentralized_hedac` did not exist. The first
+  shell invocation also exposed an environment-only `pytest` entry-point path
+  issue; rerunning via `.venv/bin/python -m pytest` reached the intended red
+  failure. After implementation, the new contracts plus existing aerial
+  feedback tests passed `10/10`.
+- Deterministic real-output validation runs three Dubins agents for 80 control
+  steps and renders their target, trajectories, final range links, and three
+  distinct local heat fields in
+  `docs/assets/decentralized_hedac_core_milestone.png`.
+- Commands executed: `.venv/bin/python -m pytest -q
+  tests/test_decentralized_hedac.py`, `.venv/bin/python -m pytest -q
+  tests/test_decentralized_hedac.py tests/test_aerial_multifidelity_feedback.py`,
+  and `MPLCONFIGDIR=/tmp/ral_marta_mpl .venv/bin/python
+  examples/plot_decentralized_hedac_core_milestone.py`.
+- Numerical and behavioral regressions: none in the existing centralized path.
+  The reusable HEDAC methods now accept optional caller-owned coverage and heat
+  arrays, while their default shared-state behavior is unchanged. The new
+  controller is not yet selected by the coupled builder in this milestone.
 
 ## Common-corner composition-initialization milestone
 
@@ -2272,3 +3002,759 @@ committed: pull requests upload it as a 30-day workflow artifact, and a push to
 - Mathematical documentation and regressions: no equations, metrics,
   controllers, fields, sensing, or dynamics changed. This is offline plotting
   only, so the existing mathematical references remain current.
+
+## Standalone Zhang distributed-coverage baseline milestone
+
+- Files changed: new `evaluation/zhang.py`,
+  `evaluation/run_zhang_baseline.py`, `evaluation/plot_zhang_baseline.py`, and
+  `evaluation/zhang_io.py`; new `configs/zhang_baseline.yaml` and
+  `configs/zhang_baseline_smoke.yaml`; new `tests/test_zhang_baseline.py`,
+  `examples/plot_zhang_baseline_milestone.py`,
+  `docs/assets/zhang_baseline_milestone.png`, and
+  `docs/architecture/implementation_zhang_baseline.md`; plus `.gitignore`,
+  `README.md`, `docs/experimental_evaluation_plan.md`,
+  `docs/mathematical_formulation.md`, its LaTeX source, and this status file.
+- The new controller is isolated from both `CoupledSimulation` and the
+  Egerstedt runner. It implements Zhang Algorithms 1 and 2 with rasterized
+  weighted power cells, power-cell edge adjacency, geometric aerial
+  deployment, distributed load and load-to-mass consensus, cell-weight and
+  aerial-position adjustment, neighbor-cell ground transfers, and
+  high-resolution limited-range Lloyd centroids. All communication is logical
+  same-step neighbor exchange in one Python process; both robot classes retain
+  the paper's first-order point dynamics.
+- The standalone experiment removes obstacles rather than silently extending
+  the paper. Its fixed scalar field is quantized independently to configured
+  LOW and HIGH resolutions. The default fixes A5/G14 and sweeps
+  `R_G = [0.15, 0.25, 0.35, 0.50]`; arbitrary composition entries are also
+  accepted only when `aerial > 1` and `ground > aerial`. Multiple composition
+  and range declarations form an explicit Cartesian product.
+- Initial position streams are nested across conditions. Random tie streams are
+  paired across sensing ranges within an episode/composition. The 61-by-61
+  default grid uses deployment tolerance `0.01`; all ten configured seeds
+  settled in 415--714 deployment steps. The earlier `0.001` candidate caused
+  some sub-grid raster-centroid limit cycles to reach the 1000-step cap and was
+  rejected before finalizing the configuration.
+- Tests were written before production modules and initially failed collection
+  because the Zhang modules did not exist. The five deterministic contracts now
+  cover weighted-cell expansion and adjacency, load conservation and ratio
+  consensus, sensing-limited hierarchical centroids, repeatable closed-loop
+  cost reduction, paired composition/range archive shapes, and real plotting.
+- The 80-step real-output smoke run used four conditions:
+  A2/G5 at radii 0.35 and 0.55 and A3/G6 at the same radii. Their initial costs
+  were `4.71220682449`, `4.71220682449`, `3.85230378855`, and
+  `3.85230378855`; final costs were `3.98624940490`, `3.85875685639`,
+  `3.73335508545`, and `3.25289557049`. Final loads exactly matched targets
+  `[3,2]`, `[3,2]`, `[2,2,2]`, and `[2,2,2]`. Accumulated ground travel was
+  `0.688596293341`, `1.11381538145`, `1.06895192802`, and
+  `1.43638264829`.
+- The deterministic 2350-by-1801 milestone figure was regenerated from the
+  saved real run and visually inspected. The HIGH field, final power-cell
+  boundaries, aerial and ground trajectories, full cost histories, sensing
+  sweep summaries, titles, axes, and legends are readable and unclipped.
+- Commands executed included the initial red test, repeated focused Zhang
+  tests, the existing Egerstedt/scenario-pipeline regression selection, an
+  80-step smoke run, all-ten-seed default initialization validation, milestone
+  regeneration, Ruff lint and format checks, Python compilation,
+  `git diff --check`, the full pytest suite, and a forced LaTeX build.
+- Validation: the focused cross-component selection passed `11/11`; the new
+  Zhang suite passed `5/5`; Ruff, formatting, compilation, and diff checks
+  passed. The full suite passed 257 tests and retained four previously
+  documented unrelated failures: canonical 300 versus configured 200 steps,
+  orange versus current cyan ground trajectory color, ablation 360-degree
+  versus configured 90-degree ground FOV, and required
+  `posterior_version=` progress text. The mathematical reference built a
+  22-page PDF; existing stream, box-splitting, and table-width warnings remain.
+- Numerical and behavioral regressions: none in the multifidelity or Egerstedt
+  implementations because no production controller, estimator, pipeline, or
+  existing baseline file imports the Zhang code. Zhang outputs are new. The
+  baseline deliberately has no posterior or reconstruction metrics, uses no
+  obstacles, and is not automatically invoked by the multifidelity pipeline.
+
+## Single-scenario 30-second homogeneous-composition protocol milestone
+
+- Files changed for this milestone: `configs/multifidelity_composition.yaml`,
+  `README.md`, `.gitignore`, `docs/experimental_evaluation_plan.md`,
+  `docs/multifidelity_config_reference.md`,
+  `docs/mathematical_formulation.md`, its LaTeX source,
+  `tests/test_multifidelity_composition_pipeline.py`, this status file, and the
+  new real-output figure
+  `docs/assets/homogeneous_composition_30s_milestone.png`.
+- The publication composition configuration now declares only `easy_long`.
+  Both its base simulation horizon and scenario override are 300 integration
+  steps at $\Delta t=0.1$ s, for a 30-second mission. The former
+  `hard_short` declaration was removed from the publication configuration.
+  Reusable multi-scenario parsing, selection, and smoke-test coverage remain
+  available for other configurations.
+- The experiment documentation now specifies one conditional five-obstacle
+  comparison rather than a two-scenario study. At the shared 0.5-second
+  sensing period there are 60 sensing events and 6000 submitted observations
+  per episode for every ten-robot composition. LOW/HIGH totals are 6000/0,
+  1200/4800, and 0/6000 for A10/G0, A2/G8, and A0/G10, respectively.
+- Deterministic real-output validation used seed 42, one episode, all three
+  publication compositions, and the full 300-step horizon. The archive stored
+  301 states through exactly 30.0 s; its last posterior publication was at
+  29.0 s and the evaluator retained the existing final-posterior hold through
+  the mission endpoint for time averages. The pipeline produced raw and
+  evaluated archives plus metric and A2/G8 trajectory figures under
+  `/tmp/homogeneous_30s_milestone`. The 3080-by-1491 metric figure copied to
+  `docs/assets/homogeneous_composition_30s_milestone.png` was visually
+  inspected; all six panels, legends, physical-time axes, labels, and margins
+  are readable.
+- Commands executed included the focused composition/scenario/trajectory test
+  selection, the one-episode publication-config pipeline, archive metadata and
+  observation-count checks, the full pytest suite, Ruff lint and format
+  checks, Python compilation, YAML assertions, `git diff --check`, image
+  inspection, and a forced `latexmk` build of the mathematical reference.
+- Validation results: 29 focused tests passed. The full suite passed 271 tests
+  and retained the same four previously documented unrelated failures:
+  canonical `configs/multifidelity.yaml` 200 versus its test's 300-step
+  expectation, ground-trajectory cyan versus orange, ablation ground FOV 90
+  versus 360 degrees, and missing `posterior_version=` progress text. Ruff,
+  formatting, compilation, YAML validation, and diff checks passed. The
+  mathematical reference built successfully as a 25-page PDF with its existing
+  stream, box-splitting, and table-width warnings.
+- Numerical and behavioral regressions: no estimator, controller, scheduler,
+  robot, or metric equation changed. The intentional protocol change increases
+  the publication composition mission and observation opportunities by 50%
+  relative to the former 20-second `easy_long` setting and removes the hard
+  condition from that publication sweep.
+
+## Paper reconstruction-history figure milestone
+
+- Files changed for this milestone:
+  `evaluation/plot_multifidelity_composition.py`,
+  `tests/test_multifidelity_composition_pipeline.py`, the regenerated
+  `docs/assets/homogeneous_composition_30s_milestone.png`, and this status file.
+- The composition plot is now a single row containing only the NRMSE, KL, and
+  NLPD histories. Its subplot titles are exactly `NRMSE`, `KL Divergence`, and
+  `NLPD`; the global title and the former final/time-average summary row were
+  removed. The evaluated archive still retains every final and time-average
+  value for tabulation.
+- Legend labels are derived from the saved aerial and ground counts: a zero
+  ground count maps to `aerial-only`, two active classes map to
+  `heterogeneous`, and a zero aerial count maps to `ground-only`. This avoids
+  hard-coding the publication's numeric composition strings while producing
+  the requested labels for A10/G0, A2/G8, and A0/G10.
+- A deterministic contract now captures the real Matplotlib figure before it
+  closes and asserts three axes, the exact titles, no suptitle, and the exact
+  legend order. The test was first observed failing against the old six-panel
+  plot. Removing the old hyperparameter-policy helper initially exposed its
+  import by the reusable two-scenario plotter; the helper was restored for
+  backward compatibility and remains absent from the paper figure.
+- The figure was regenerated from the real one-episode, 300-step evaluated
+  archive at `/tmp/homogeneous_30s_milestone/evaluated/easy_long.npz`. The
+  resulting 2180-by-645 PNG was inspected at original resolution; titles,
+  curves, axes, grid, legend, and margins are readable and unclipped.
+- Validation commands covered the focused composition and scenario pipelines,
+  Ruff lint and formatting, Python compilation, and `git diff --check`.
+  Twenty-two focused tests passed and all static checks passed. No estimator,
+  controller, metric, archive, or numerical result changed; this milestone is
+  an offline presentation change only, so the mathematical reference remains
+  unchanged.
+
+## Paper reconstruction typography and two-column layout milestone
+
+- Files changed for this milestone:
+  `evaluation/plot_multifidelity_composition.py`,
+  `tests/test_multifidelity_composition_pipeline.py`, `README.md`,
+  `paper/updated.tex`, the new vector
+  `paper/pics/error_metrics.pdf`, the regenerated real-output preview
+  `docs/assets/homogeneous_composition_30s_milestone.png`, and this status file.
+- The plotter now exposes paper-style defaults as named constants and accepts
+  matching Python keywords and CLI flags for figure width, figure height,
+  subplot-title size, axis-label size, tick-label size, legend size, line
+  width, confidence-band opacity, and raster DPI. Inputs are validated before
+  reading the archive. PDF output remains vector graphics, while the DPI
+  setting controls raster output.
+- Defaults target the IEEE conference template's approximate two-column text
+  width: 7.16-by-2.55 inches, 10-point titles, 9-point axis and legend labels,
+  8-point ticks, 2.2-point curves, 0.16 confidence-band opacity, and 300 DPI.
+  `paper/updated.tex` now embeds `pics/error_metrics.pdf` in a top-positioned
+  `figure*` at `\textwidth`; the former single-column `figure` was the main
+  source of unreadable downscaling.
+- The deterministic styling contract first failed because the old plotting API
+  did not accept the requested controls. It now asserts the requested physical
+  figure size, all font sizes, curve widths, band opacity, three-axis layout,
+  titles, absence of a suptitle, and legend labels.
+- Both the vector paper asset and the 2182-by-793 PNG preview were regenerated
+  from the saved 30-episode, 300-step `easy_long` evaluated archive. The preview
+  was inspected at original resolution. A forced two-pass LaTeX build produced
+  an eight-page `paper/updated.pdf`; rendered page 7 was inspected and confirms
+  that titles, ticks, axes, curves, bands, and legend are readable at full-page
+  scale without clipping.
+- Validation commands covered 22 focused composition/scenario tests, two
+  post-format regression tests, Ruff lint and formatting, Python compilation,
+  CLI-help inspection, `git diff --check`, vector/raster regeneration, the
+  forced paper build, and rendered-page inspection. All focused and static
+  checks passed. The paper retains its existing missing-author, package,
+  underfull-box, and undefined `da fare` reference warnings.
+- Numerical and behavioral regressions: none. Estimation, metrics, bootstrap
+  samples, saved archives, and plotted data are unchanged; only configurable
+  presentation and LaTeX placement changed. The mathematical reference remains
+  current because no implemented equation changed.
+
+## Single-column four-method paper figures milestone
+
+- Files changed for this milestone:
+  `evaluation/plot_four_method_comparison.py`,
+  `evaluation/plot_four_method_trajectories.py`,
+  `evaluation/run_four_method_comparison_pipeline.py`,
+  `tests/test_four_method_comparison_pipeline.py`, `README.md`, the regenerated
+  real-output assets `docs/assets/four_method_comparison_milestone.png` and
+  `docs/assets/four_method_trajectory_milestone.png`, and this status file.
+- Both four-method figures now target an IEEE single column rather than full
+  text width. The metric figure uses a 3.5-by-5.2-inch canvas and stacks the
+  unchanged coverage-effectiveness and locational-cost histories vertically.
+  The trajectory figure keeps its two-by-two map arrangement on a
+  3.5-by-4.0-inch canvas. Saving no longer uses a tight bounding box, so the
+  declared physical width is retained exactly instead of expanding around long
+  text.
+- Typography reuses the reconstruction figure's paper defaults: 10-point
+  titles, 9-point axis labels, and 8-point ticks. Both standalone CLIs expose
+  the physical canvas and typography controls; the metric CLI additionally
+  exposes legend size, curve width, and confidence-band opacity. Raster output
+  defaults to 300 DPI, including the one-command four-method pipeline.
+- The trajectory figure now contains only the four map axes. Its side density
+  color scale, figure legend, global episode/seed/scenario title, and Zhang
+  phase-transition title suffix were removed. Titles are exactly `Proposed`,
+  `Rudolph [17] - LR`, `Rudolph [17]`, and `Zhang [18]` in archive order.
+- A deterministic Matplotlib contract first failed against the old plotters and
+  now asserts the two physical canvases, vertical metric-panel ordering, four
+  trajectory axes, exact titles, empty figure-legend list, and absent suptitle.
+- Real previews were regenerated from the saved four-method comparison
+  archives. The metric PNG is exactly 1050-by-1560 pixels and the trajectory
+  PNG is exactly 1050-by-1200 pixels at 300 DPI. Both were inspected at
+  original resolution; titles, axes, curves, confidence bands, trajectories,
+  footprints, and margins are readable and unclipped. These saved archives are
+  milestone data rather than a replacement for the final publication episode
+  set.
+- Validation commands covered the initial failing contract, a 12-test
+  four-/three-method and Zhang regression selection, the three focused
+  four-method tests after formatting, Ruff lint and formatting, Python
+  compilation, `git diff --check`, both real-output regenerations, and original
+  resolution image inspection. All tests and static checks passed.
+- Numerical and behavioral regressions: none. No controller, baseline,
+  estimator, metric, confidence interval, or saved result changed; only figure
+  sizing, presentation, and the pipeline's raster-resolution default changed.
+  The mathematical reference therefore remains current.
+
+## Side-by-side single-column metric revision
+
+- Files changed for this revision:
+  `evaluation/plot_four_method_comparison.py`,
+  `tests/test_four_method_comparison_pipeline.py`, `README.md`, the regenerated
+  `docs/assets/four_method_comparison_milestone.png`, and this status file.
+- In response to the preferred paper layout, the coverage-effectiveness and
+  locational-cost histories now occupy one horizontal row on the same exact
+  3.5-inch single-column canvas. The canvas height is 3.0 inches. The long
+  coverage title wraps onto two lines, while the global title is shortened to
+  `Paired A3/G7 comparison`.
+- The redundant per-axis legends were replaced by one shared two-column legend
+  below the panels. All four method labels, curves, confidence bands, axis
+  meanings, colors, and line styles are unchanged. Saving retains the exact
+  physical canvas rather than expanding a tight bounding box.
+- The deterministic figure contract was observed failing against the vertical
+  arrangement and now asserts left-to-right axis placement plus one shared
+  figure legend. The real 30-second milestone preview was regenerated at
+  1050-by-900 pixels and inspected at original resolution; both panels, the
+  wrapped title, axes, curves, bands, and legend are readable and unclipped.
+- Numerical and behavioral regressions: none. This is an offline layout-only
+  revision; no metric, confidence interval, archive, controller, estimator, or
+  trajectory output changed.
+
+## Title-free four-method metric revision
+
+- Files changed for this revision:
+  `evaluation/plot_four_method_comparison.py`,
+  `tests/test_four_method_comparison_pipeline.py`, `README.md`, the regenerated
+  `docs/assets/four_method_comparison_milestone.png`, and this status file.
+- The side-by-side coverage/cost figure now omits its global title, both subplot
+  titles, and both y-axis labels. The x-axis mission-time labels, numeric ticks,
+  curves, confidence bands, and shared method legend remain unchanged. The
+  trajectory figure and its four requested method titles are unchanged.
+- The deterministic contract was first observed failing against the titled
+  figure and now asserts the absence of a suptitle, subplot titles, and y-axis
+  labels. The 1050-by-900 real-output preview was regenerated and inspected at
+  original resolution; both data panels and the shared legend are readable and
+  unclipped.
+- Numerical and behavioral regressions: none. This is an offline presentation
+  change only; all archived and plotted numerical values are unchanged.
+
+## Mathematical-title four-method metric revision
+
+- Files changed for this revision:
+  `evaluation/plot_four_method_comparison.py`,
+  `tests/test_four_method_comparison_pipeline.py`, `README.md`, the regenerated
+  `docs/assets/four_method_comparison_milestone.png`, and this status file.
+- The two side-by-side metric panels again have subplot titles, now exactly
+  `$\mathcal{E}$` for coverage effectiveness and `$\mathcal{H}$` for
+  locational cost. The global title and both y-axis labels remain absent. The
+  shared legend, mission-time labels, curves, and confidence bands are
+  unchanged.
+- The configurable `--title-font-size` option was restored to the metric CLI
+  and Python API. The deterministic figure contract asserts the exact
+  math-text title strings and the continued absence of a suptitle and y-axis
+  labels.
+- The 1050-by-900 real-output preview was regenerated and visually inspected;
+  both calligraphic titles render cleanly and the figure remains unclipped.
+  Numerical and behavioral regressions: none; this is an offline labeling
+  change only.
+
+## Grayscale four-method trajectory revision
+
+- Files changed for this revision:
+  `evaluation/plot_four_method_trajectories.py`,
+  `tests/test_four_method_comparison_pipeline.py`, the regenerated
+  `docs/assets/four_method_trajectory_milestone.png`, and this status file.
+- All four trajectory panels now render the shared hidden-truth density using
+  the sequential Matplotlib `Greys` colormap instead of `magma`. A deterministic
+  contract was first observed failing against the former colormap and now
+  asserts `Greys` on every map axis.
+- The cyan aerial and green ground trajectories remain unchanged. Because the
+  former white ground-footprint outlines disappeared over the grayscale map's
+  white low-density regions, those outlines now use mid-gray `#707070` at 0.8
+  opacity; they remain visible over both light and dark field regions.
+- The 1050-by-1200 real-output preview was regenerated and inspected at
+  original resolution. Density peaks, trajectories, endpoint markers, sensing
+  footprints, titles, and axes are distinct and unclipped. Three focused tests,
+  Ruff lint and formatting, Python compilation, and `git diff --check` passed.
+- Numerical and behavioral regressions: none. The saved truth normalization,
+  trajectories, states, sensing radii, and all quantitative results are
+  unchanged; this is an offline color-presentation change only.
+
+## Editable tab-color trajectory revision
+
+- Files changed for this revision:
+  `evaluation/plot_four_method_trajectories.py`,
+  `tests/test_four_method_comparison_pipeline.py`, `README.md`, the regenerated
+  `docs/assets/four_method_trajectory_milestone.png`, and this status file.
+- Aerial paths, start markers, end markers, and limited-range footprint circles
+  now use `tab:blue`; ground paths and their start/end markers use `tab:green`.
+  These replace the former high-saturation cyan and lime colors while retaining
+  the sequential `Greys` truth background.
+- All presentation colors are declared together near the beginning of the
+  trajectory plotter as `AERIAL_COLOR`, `GROUND_COLOR`,
+  `AERIAL_FOOTPRINT_COLOR`, `GROUND_FOOTPRINT_COLOR`,
+  `ENDPOINT_EDGE_COLOR`, and `FIGURE_BACKGROUND_COLOR`. Editing those constants
+  consistently restyles all four panels.
+- The deterministic contract was first observed failing before the new color
+  constants existed and now verifies that every map contains both configured
+  trajectory colors. The 1050-by-1200 real-output preview was regenerated and
+  inspected at original resolution; blue and green remain distinguishable from
+  each other and from the grayscale field.
+- Numerical and behavioral regressions: none. This is an offline color change;
+  saved trajectories, states, footprints, truth, and metrics are unchanged.
+
+## Offline selected-episode MP4 replay milestone
+
+- Files changed for this milestone:
+  `evaluation/render_multifidelity_episode_videos.py`,
+  `tests/test_render_multifidelity_episode_videos.py`, `pyproject.toml`,
+  `uv.lock`, `README.md`, `docs/mathematical_formulation.md`,
+  `docs/assets/offline_episode_video_milestone.png`, and this status file.
+- The new CLI reads an immutable `multifidelity_composition_raw` archive,
+  selects an exact composition and zero-based episode, and never reruns the
+  simulator, estimator, or controllers. It writes exactly seven independent
+  H.264/YUV420P `.mp4` files: MFGP estimated controller density, hidden
+  ground-truth density, NRMSE, KL, NLPD, locational cost $H$, and
+  footprint-normalized effectiveness. Density videos contain current aerial
+  and ground markers only; trajectory trails are intentionally absent.
+- Saved state index `k + 1` is aligned with completed outer step `k`. The
+  estimated-density video holds the latest posterior whose saved
+  `posterior_step <= k`. NRMSE, KL, and NLPD reveal only actual asynchronous
+  posterior records, while $H$ and effectiveness are evaluated for every
+  post-step saved ground state using the repository's existing equations.
+  The final completed step is always encoded even when `--frame-interval`
+  does not divide the episode length.
+- Aerial-only compositions are rejected because nearest-ground $H$ and
+  ground-footprint effectiveness are undefined without a ground robot. The
+  renderer does not invent surrogate values. `imageio-ffmpeg>=0.6.0` is locked
+  so MP4 encoding works without a separately installed system ffmpeg;
+  Matplotlib still performs the synchronous frame rendering and H.264 encode.
+- Test-first validation began with the expected import failure because the new
+  module did not exist. After implementation, the six dedicated contracts
+  passed and verify CLI selection, direct execution, active-robot slicing,
+  asynchronous posterior ordering, exact $H$ reuse, finite metric histories,
+  seven MP4 names, frame subsampling/final-frame inclusion, raw-archive hash
+  preservation, and the zero-ground rejection. The broader focused selection
+  passed 35 tests in 12.91 s; the post-format dedicated rerun passed six tests
+  in 2.28 s.
+- Real encoder validation first generated seven four-frame MP4s from a
+  deterministic four-step `A1/G1` smoke archive. It then replayed the existing
+  30-episode archive at composition `A2/G8`, episode index 7 (seed 49), using
+  `--frame-interval 50 --fps 5 --dpi 72`. All seven files were encoded with
+  H.264 High profile and YUV420P: density videos are 518-by-432 pixels and
+  metric videos are 576-by-324 pixels. They are available below
+  `output/multifidelity_episode_video_A2_G8_episode_007/`. A frame extracted
+  from the real estimated-density MP4 at saved step 150 was visually inspected
+  for the MFGP field, both robot classes, obstacle overlay, fixed spatial
+  limits, title, posterior version, and absence of trails; that frame is the
+  milestone PNG.
+- Commands executed included the initial failing and passing dedicated pytest
+  runs; the 35-test focused composition/metric/trajectory selection; locked
+  dependency sync; smoke and real episode-7 CLI renders; ffmpeg stream and
+  frame inspection; scoped Ruff lint and format checks; Python compilation;
+  `git diff --check`; repository-wide Ruff; and the complete pytest inventory
+  split into bounded groups.
+- Repository validation totals 286 passes and five unrelated failures already
+  present in the dirty worktree: canonical 200 steps versus a stale 300-step
+  assertion, cyan versus former orange final-plot ground color, the
+  four-method plot's $\mathcal L$ title versus a test expecting $\mathcal H$,
+  canonical/ablation ground-FOV mismatch, and missing `posterior_version=` in
+  CLI progress text. Repository-wide Ruff reports 61 pre-existing violations
+  in legacy files. The new module and test are Ruff-clean, Ruff-formatted,
+  compile successfully, and pass `git diff --check`.
+- Numerical and behavioral regressions: none introduced. No estimator,
+  scheduler, sensor, controller, field, dynamics, or saved raw array changed.
+  All new calculations and encoding are offline and read-only. NRMSE, KL,
+  NLPD, $H$, and effectiveness reuse the exact existing implementations rather
+  than defining alternative metrics.
+
+## Four-method selected-episode MP4 replay milestone
+
+- Files added or revised for this follow-up:
+  `evaluation/render_four_method_episode_videos.py`,
+  `tests/test_render_four_method_episode_videos.py`, `README.md`,
+  `docs/mathematical_formulation.md`, this status file, and
+  `docs/assets/four_method_offline_video_milestone.png`. The preceding
+  composition-archive renderer remains available and unchanged.
+- The preferred offline CLI now consumes the complete
+  `output/four_method_comparison/` artifact directory and validates the four
+  raw archives, evaluated archive, scenario fingerprints, paired scenario
+  arrays, seeds, state times, method order, and requested zero-based episode.
+  It reruns no simulation or controller.
+- Seven synchronized H.264 MP4s are written. The proposed estimated-density
+  video shows current MFGP robots over the latest causally available saved
+  controller density. The ground-truth video shows a two-by-two panel for
+  proposed MFGP-LR, Egerstedt-LR, full-range Egerstedt, and standard Zhang over
+  their common hidden truth. All map panels show current markers only and no
+  trajectory trails. NRMSE, KL, and NLPD are explicitly MFGP-only because the
+  baseline archives publish no GP posterior. $H$ and footprint-normalized
+  effectiveness use all four per-episode histories already stored in
+  `evaluated.npz`.
+- Six deterministic tests were added before implementation; their initial run
+  failed at import because the module did not exist. They now pass and cover
+  CLI defaults/direct execution, five-archive loading, paired method order,
+  active state shapes, MFGP posterior selection, reconstruction histories,
+  exact reuse of evaluated $H$/effectiveness arrays, seven `.mp4` destinations,
+  common frame counts, final-frame forcing, and episode bounds.
+- Real validation used the existing publication comparison episode index 7,
+  seed 49, with `--frame-interval 75 --fps 5 --dpi 72`. The first run exposed
+  an odd 345-pixel comparison-metric height after the first five encodes;
+  libx264 correctly rejected that YUV420P frame. The metric figure was changed
+  to an even 576-by-324 encoded size and the entire command was rerun. All
+  seven outputs then passed stream inspection as H.264 High profile/YUV420P.
+  The four-panel truth video is 662-by-576, the MFGP density video is
+  518-by-432, and all five metric videos are 576-by-324.
+- Real outputs are under
+  `output/four_method_comparison/videos/episode_007/`. The milestone image was
+  extracted from the synchronized truth video at completed step 225 and
+  visually inspected: all four labels, three aerial and seven ground markers
+  per panel, common density scale, spatial limits, time/episode title, and
+  absence of trails are correct. The final $H$ frame was also inspected for
+  all four labeled histories and the complete 30-second mission axis.
+- Validation after formatting passed all 18 focused offline-renderer,
+  reconstruction-metric, and baseline-evaluation tests in 6.71 s. The existing
+  four-method pipeline suite retained its sole unrelated failure: production
+  labels the cost panel `$\mathcal L$`, while the stale test expects
+  `$\mathcal H$`; its other two tests passed. Scoped Ruff lint/format, Python
+  compilation, and `git diff --check` passed.
+- Episode-7 numerical diagnostics from the real saved data were: MFGP NRMSE
+  `0.089154460737 -> 0.032626787285`, KL
+  `0.726531099677 -> 1.905287588250`, and NLPD
+  `-0.503446981200 -> -1.436482409090`. Final $H$ in declared method order was
+  `66.7834775527, 98.3449360230, 83.6839785615, 92.2629668557`; final
+  effectiveness was `0.822825628470, 0.865427065410, 0.792315146244,
+  0.831554640526`. These are replay diagnostics, not altered evaluation
+  results.
+- Numerical and behavioral regressions: none. This is a read-only offline
+  replay addition. Proposed reconstruction values and four-method comparison
+  metrics use the existing saved arrays/equations without changing evaluation,
+  estimation, scheduling, control, or trajectories.
+
+### Four-method video presentation revision
+
+- The seven-video interface now uses the ordered keys `estimated_density`,
+  `density_comparison`, `nrmse`, `kl`, `nlpd`, `L`, and `effectiveness`.
+  Locational-cost output is renamed `four_method_L.mp4`; the mixed-field panel
+  output is `four_method_density_comparison.mp4`.
+- Every dynamic subtitle containing episode, step, current value, or
+  higher/lower-is-better text was removed. Density panels retain only static
+  descriptive titles. Reconstruction plots retain their static MFGP metric
+  titles. Locational cost is titled `Locational cost $\mathcal{L}$` and
+  effectiveness is titled
+  `Footprint-normalized effectiveness $\mathcal{E}$`; both intentionally have
+  an empty y-axis label.
+- In the synchronized two-by-two density comparison, the proposed panel now
+  uses the latest causally available saved MFGP `posterior_density`. The three
+  baseline panels continue to use the shared hidden `truth_density`, because
+  their raw archives contain no GP estimate. All four field panels use a
+  common zero-based color range whose maximum covers both truth and every
+  selected-episode MFGP posterior, preventing clipping or per-panel rescaling.
+- A deterministic contract first failed because the new field-selection
+  helper did not exist. Seven contracts now verify the new `L` key/filename,
+  density-comparison filename, proposed-posterior versus baseline-truth field
+  selection, absence of forbidden subtitle fragments, exact $\mathcal L$ and
+  $\mathcal E$ titles, and empty y labels in addition to all previous replay
+  guarantees.
+- The corrected real episode-7 outputs were rendered into
+  `output/four_method_comparison/videos/episode_007_revised/` with
+  `--frame-interval 75 --fps 5 --dpi 72`. All seven streams were inspected as
+  H.264 High profile/YUV420P. The revised two-by-two comparison frame and the
+  final $\mathcal L$ and $\mathcal E$ frames were visually inspected: the
+  proposed MFGP estimate differs from the three truth backgrounds, titles are
+  static, and neither comparison metric has a y-axis label. The deterministic
+  summary at `docs/assets/four_method_offline_video_milestone.png` was updated
+  from the revised density-comparison video.
+- Focused replay, metric, and evaluation validation passed 19 tests in 6.36 s.
+  The established four-method pipeline initially exposed its stale
+  `$\mathcal H$` test expectation; after updating that presentation contract
+  to the requested `$\mathcal L$`, the pipeline and video contracts passed 10
+  tests in 5.98 s. Scoped Ruff lint/format, Python compilation, and
+  `git diff --check` passed.
+- Numerical and behavioral regressions: none. The revision changes only
+  offline field selection and presentation; it does not mutate raw archives,
+  estimator state, metric arrays, controllers, commands, or trajectories.
+
+### Four-method static density and trajectory companions
+
+- Files revised for this follow-up:
+  `evaluation/render_four_method_episode_videos.py`,
+  `tests/test_render_four_method_episode_videos.py`, `README.md`,
+  `docs/mathematical_formulation.md`, and this status file.
+- Every normal four-method video render now also writes four PNG companions:
+  `ground_truth_density.png`, `mfgp_trajectories_estimated_density.png`, and
+  `mfgp_trajectories_variance.png`, plus
+  `mfgp_trajectories_density_difference.png`. A separate Python entry point can
+  render only these images without re-encoding the MP4s.
+- The truth image is deliberately uncluttered. All three trajectory images use all
+  saved proposed aerial and ground positions, distinct class colors and line
+  styles, start crosses, and final robot markers without inferred path data.
+  Their backgrounds are the final causally available saved MFGP controller
+  density and raw latent HIGH posterior variance. The truth and estimate share
+  the evolving comparison video's density normalization; variance has its own
+  zero-based scale.
+- Two deterministic contracts were written first and failed at import because
+  the image API did not exist. The expanded nine-test renderer contract now
+  checks exact truth/final-density/final-variance array selection, four PNG
+  names and nonempty raster files, and automatic PNG creation alongside the
+  unchanged seven MP4 outputs.
+- Real episode-7 companions were generated at 150 DPI under
+  `output/four_method_comparison/videos/episode_007_revised/`. All four are
+  1080-by-900 RGBA PNGs. Original-resolution inspection confirmed the common
+  density scale, uncluttered truth reference, complete proposed paths and
+  endpoint markers, readable obstacle overlay, and visible final latent
+  variance structure. A targeted pixel crop additionally confirmed that the
+  estimated-density figure's axes and colorbar are present in the file despite
+  the initial multi-image preview viewport clipping them.
+- The final combined selection passed all 28 four-method pipeline, four-method
+  renderer, homogeneous renderer, original replay renderer, and metric tests in
+  10.28 s. Scoped Ruff lint/format, Python compilation, and `git diff --check`
+  passed.
+- Numerical and behavioral regressions: none. All four images use saved arrays
+  only and do not change or rerun the estimator, controllers, robot motion,
+  metrics, video frames, or raw/evaluated archives.
+
+#### Density, variance, and signed-error colormap revision
+
+- All four-method density video panels and static density images now use
+  Matplotlib `YlOrRd`, so increasing probability density progresses toward red.
+  The final MFGP variance companion uses `Greys`, so large posterior variance
+  and therefore less-explored regions are darker.
+- The fourth trajectory companion displays the exact signed difference
+  `posterior_density[-1] - truth_density`. Its zero-centered symmetric
+  `RdBu_r` scale renders underestimation blue, agreement white, and
+  overestimation red without favoring either sign.
+- The deterministic contract first failed because the palette constants and
+  signed-difference output did not exist. It now verifies the exact field
+  subtraction, requested density/variance colormaps, chosen difference
+  colormap, and fourth PNG filename. All nine focused renderer tests pass.
+- The complete episode-7 output directory was regenerated with
+  `--frame-interval 75 --fps 5 --dpi 72`, followed by 150-DPI regeneration of
+  the four static companions. The four-method density-comparison video frame
+  and all companion images were inspected at original resolution. Density
+  peaks are red, high-variance unsampled regions are dark, and the signed error
+  has a visually neutral zero with balanced blue/red limits. All PNGs are
+  1080-by-900 RGBA files.
+- The combined replay/pipeline selection passed 28 tests in 11.31 s. The
+  post-format focused renderer rerun, scoped Ruff lint/format, Python
+  compilation, and `git diff --check` also passed.
+- Numerical and behavioral regressions: none. The change affects colormap
+  presentation and adds a deterministic subtraction of two saved normalized
+  density arrays; it does not change estimation, normalization, variance,
+  controllers, trajectories, metrics, or archives.
+
+#### Live variance and spatial reconstruction-error videos
+
+- The normal four-method selected-episode replay now produces nine MP4s. New
+  files `mfgp_variance.mp4` and `mfgp_density_difference.mp4` place current
+  proposed-method robot markers over the latest causally available saved MFGP
+  latent HIGH variance and signed normalized-density error, respectively.
+- Both videos use fixed episode-wide color limits. Variance uses zero through
+  the maximum of all selected posterior-variance records. Signed error uses
+  symmetric limits based on the maximum absolute `posterior_density -
+  truth_density` value over every selected posterior. This prevents apparent
+  color changes caused by per-frame rescaling.
+- One new deterministic contract was written first and failed because the
+  causal spatial-field helper did not exist. The ten focused renderer tests now
+  verify latest-posterior density, variance, and signed-error selection; nine
+  synchronized MP4 destinations and frame counts; and the two new filenames.
+- The complete episode-7 replay was regenerated with `--frame-interval 75
+  --fps 5 --dpi 72`. Both new files are 518-by-432 H.264 High profile/YUV420P
+  streams at 5 fps. Early and later frames from each video were extracted and
+  inspected: robot markers advance, variance changes from the initial posterior
+  to explored low-variance regions, and the signed spatial error changes while
+  retaining one balanced episode-wide color scale.
+- The final combined four-method pipeline, four-method renderer, homogeneous
+  renderer, original replay renderer, and metric selection passed 29 tests in
+  12.70 s. Scoped Ruff lint/format, Python compilation, and `git diff --check`
+  passed.
+- Numerical and behavioral regressions: none. The videos read saved posterior
+  arrays and robot states only; they do not alter the estimator, controller,
+  scheduler, metrics, trajectories, or archives.
+
+#### Combined four-panel spatial reconstruction video
+
+- The four-method replay now emits a tenth synchronized MP4 named
+  `mfgp_spatial_reconstruction_comparison.mp4`. Its fixed layout is ground truth
+  at top left, latest causal MFGP density at top right, latest causal latent
+  HIGH variance at bottom left, and latest causal signed density error at bottom
+  right.
+- Every panel overlays the identical current proposed aerial and ground robot
+  markers without trails. The top row shares one episode-wide `Reds` density
+  scale; the lower panels reuse the standalone `Greys` variance and symmetric
+  `RdBu_r` error scales. Three colorbars state the corresponding units.
+- The deterministic contract first failed because the combined-field helper did
+  not exist. It now verifies exact panel ordering and array selection, the ten
+  synchronized MP4 writers, the output filename, and all four static panel
+  titles.
+- Real episode-7 rendering produced the combined video at 662-by-576 pixels,
+  5 fps, H.264 High profile/YUV420P. An extracted middle frame was inspected:
+  panel order and titles are correct, current robot positions match across all
+  four axes, and the shared density plus separate variance/error colorbars are
+  readable without clipping.
+- The final relevant four-method pipeline, four-method renderer, homogeneous
+  renderer, original replay renderer, and metric selection passed 29 tests in
+  16.27 s. Scoped Ruff lint/format, Python compilation, and `git diff --check`
+  passed.
+- Numerical and behavioral regressions: none. This is a synchronized offline
+  composition of already validated fields and states; no simulation or saved
+  value changes.
+
+#### Paper-consistent robot colors in replay outputs
+
+- Every robot overlay emitted by
+  `evaluation/render_four_method_episode_videos.py` now imports the paper
+  trajectory plotter's palette constants directly: aerial robots and paths use
+  `tab:orange`, and ground robots and paths use `tab:green`.
+- This applies consistently to the estimated-density, variance, signed-error,
+  combined spatial, and four-method density-comparison videos, plus all static
+  trajectory companion PNGs. Metric-series colors are unchanged.
+- A deterministic contract first failed against the former blue/orange replay
+  palette and now verifies the exact paper constants. The focused ten-test
+  renderer suite passes. The working tree's current `Reds` density colormap was
+  preserved; this revision changes robot presentation only.
+- All ten episode-7 MP4s and four companion PNGs were regenerated. An extracted
+  combined-video frame and the variance trajectory PNG were inspected at
+  original resolution; aerial markers/paths are orange and ground
+  markers/paths are green in both moving and accumulated-trajectory views.
+- The final relevant five-suite selection passed 29 tests in 15.08 s. Scoped
+  Ruff lint/format, Python compilation, and `git diff --check` passed.
+- Numerical and behavioral regressions: none. Only plotting constants changed;
+  saved fields, posteriors, robot states, metrics, and encoded frame timing are
+  unchanged.
+
+## Type-3-free publication PDFs for Figures 3--5
+
+- The affected assets in `paper/updated.tex` were identified as Figure 3
+  `paper/pics/error_metrics.pdf`, Figure 4
+  `paper/pics/coverage_locational_cost.pdf`, and Figure 5
+  `paper/pics/four_method_trajectories.pdf`. Before this milestone, `pdffonts`
+  reported DejaVu Sans, DejaVu Sans Oblique, and STIX math glyphs as embedded
+  Type 3 fonts in these files.
+- Added `evaluation/publication_fonts.py`, which configures Matplotlib PDF and
+  PostScript output with font type 42. The three source plotters invoke this
+  shared policy before importing `matplotlib.pyplot`, including when executed
+  directly as scripts. This embeds TrueType outlines while retaining vector
+  curves, text, math text, confidence bands, and map content.
+- Added `tests/test_publication_pdf_fonts.py`. Its deterministic contract checks
+  the PDF/PS settings and generates a real PDF containing ordinary and
+  calligraphic math text, then requires a `/FontFile2` TrueType stream and
+  rejects any `/Subtype /Type3` font dictionary.
+- Figures 3--5 were regenerated from the existing real evaluated/raw archives
+  using the documented commands. `pdffonts` now reports only embedded
+  `CID TrueType` for all fonts in the three assets; no Type 3 entry remains.
+  Rasterized previews of all three regenerated PDFs were inspected: subplot
+  layouts, mathematical titles, legends, axes, confidence bands, density map,
+  and trajectories are readable and unclipped.
+- `paper/updated.tex` compiled successfully with `latexmk -pdf
+  -interaction=nonstopmode -halt-on-error updated.tex`. The final
+  `paper/updated.pdf` font audit reports only embedded Type 1 and CID TrueType
+  fonts and prints `NO_TYPE3_FONTS`. The compile retains existing non-blocking
+  warnings about the absent author, underfull boxes, and the paper's figure
+  references during the first pass; the final pass completed successfully.
+- The relevant font, composition, and four-method plot suites passed 24 tests
+  in 12.35 s. All three direct `--help` entry points passed. Scoped Ruff
+  lint/format, Python compilation, and `git diff --check` passed after the one
+  import-order annotation correction.
+- Numerical and behavioral regressions: none. Only PDF/PS font embedding and
+  regenerated paper assets changed. Plot data, equations, layout parameters,
+  metrics, confidence intervals, trajectories, and simulation behavior are
+  unchanged. `docs/mathematical_formulation.md` remains current because no
+  mathematical implementation changed.
+
+## Homogeneous-baseline selected-episode MP4 replay milestone
+
+- Files added or revised for this milestone:
+  `evaluation/render_homogeneous_baseline_episode_videos.py`, the reusable
+  reconstruction-only path in `evaluation/render_multifidelity_episode_videos.py`,
+  `tests/test_render_homogeneous_baseline_episode_videos.py`, `README.md`,
+  `docs/mathematical_formulation.md`, and this status file.
+- The new offline CLI selects one saved heterogeneous composition and
+  automatically locates the unique equal-total-size aerial-only and ground-only
+  endpoints. It validates their episode, seed, mission clock, query grid,
+  integration weights, HIGH truth, normalized truth density, free-space mask,
+  and obstacle map before comparing them.
+- Five H.264 MP4s are produced: three-panel estimated-density and shared-truth
+  comparisons plus progressively revealed NRMSE, KL, and NLPD histories. Every
+  estimated panel and curve uses that composition's own saved asynchronous GP
+  posterior. Titles are static, current robot markers are shown without trails,
+  and metric plots retain a synchronized mission-time cursor.
+- $\mathcal L$ and $\mathcal E$ are intentionally excluded because the
+  aerial-only endpoint has no ground positions or sensing footprints. The
+  existing seven-video single-composition API still requires a ground robot;
+  only its reconstruction calculation was factored into a reusable function.
+- Seven deterministic contracts were written first and initially failed at
+  import because the renderer did not exist. They cover CLI execution, exact
+  endpoint selection and pairing, zero-sized inactive robot arrays, per-method
+  asynchronous metrics, latest-posterior field selection, shared truth,
+  five static-titled MP4 destinations, common frame counts, raw-archive
+  immutability, and rejection of a homogeneous proposed selection. Together
+  with the original renderer contracts, 13 tests passed before formatting.
+- Real validation replayed publication composition `A2/G8`, episode index 7,
+  against `A10/G0` and `A0/G10` with `--frame-interval 75 --fps 5 --dpi 72`.
+  Outputs are under
+  `output/homogeneous_baseline_videos/A2_G8/episode_007/`. All five streams are
+  H.264 High profile/YUV420P at 5 fps; density comparisons are 864-by-302 and
+  metrics are 576-by-324 pixels. Original-resolution inspection first exposed
+  a clipped right-panel suffix; per-panel titles were shortened to the complete
+  method/composition label and the five videos were regenerated. The final
+  density and NRMSE frames are readable, synchronized, statically titled, and
+  contain no trajectory trails.
+- Episode-7 saved-posterior diagnostics in declared order (heterogeneous,
+  aerial-only, ground-only) were: NRMSE `0.096261755436 -> 0.085666802166`,
+  `0.180268949286 -> 0.124952014616`, and
+  `0.196079170359 -> 0.070156490830`; KL
+  `0.975823183108 -> 1.712097479120`,
+  `7.102790928240 -> 2.592007604160`, and
+  `9.506159673040 -> 2.006572900520`; NLPD
+  `0.483891688801 -> 0.090652553122`,
+  `0.485502057962 -> 0.461615737436`, and
+  `0.525236005464 -> 0.155836848381`. These are replay diagnostics, not new or
+  altered evaluation data.
+- The final focused selection passed all 35 composition-pipeline, metric,
+  original-renderer, and new-renderer tests in 14.90 s. Scoped Ruff lint and
+  formatting, Python compilation, and `git diff --check` passed.
+- Numerical and behavioral regressions: none. The renderer reads immutable raw
+  arrays and does not rerun or mutate simulation, estimation, scheduling,
+  controllers, fields, robot states, or published posteriors.

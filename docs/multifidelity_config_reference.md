@@ -76,6 +76,44 @@ The raw and evaluated archives store the fit decisions, durations, and realized
 kernel parameters for auditability. Its discrepancy-length lower bound is
 `3.0`, while the general coupled configuration below retains `1.5`.
 
+## Proposed-method parameter-sweep protocol
+
+`configs/multifidelity_parameter_sweep.yaml` is an orchestration configuration,
+not a replacement coupled-simulation configuration. Its `base_config` selects
+the reusable coupled YAML. Under `parameter_sweep.factors`, it must declare
+exactly these six factors: `environment_size`, `team_composition`, `duration`,
+`obstacle_density`, `sensing_range`, and `measurement_noise`. Every factor has
+at least two labelled levels and exactly one level marked `reference: true`.
+
+The runner first applies all six reference levels to construct one frozen
+anchor. It then creates each condition from a fresh copy of that anchor and
+changes only the selected factor. Resolved condition YAML files are written
+under the output directory and archived paths are recorded in `manifest.json`.
+
+- Environment levels set `map.size` and
+  `ground.map.local_grid_points` together so spatial query resolution can be
+  controlled explicitly.
+- Composition levels set both robot counts and split the configured
+  `composition_sweep.total_retained_samples` in proportion to the active mixed
+  team. This sweep deliberately requires at least one robot of each class;
+  homogeneous endpoints remain in the separate composition experiment.
+- Duration levels set `simulation.num_steps`; seconds are derived from the
+  unchanged `simulation.dt`.
+- Obstacle levels set the ground obstacle count and common radius. The manifest
+  records the nominal circle-area fraction; realized raster occupancy remains
+  available in every raw archive.
+- Range levels set aerial and ground `sensor.fov_depth`. A level with
+  `full_environment: true` resolves both radii to the diagonal of the active
+  map dimensions and records `covers_full_environment: true`.
+- Noise levels set `multifidelity.low_noise_variance` and
+  `multifidelity.high_noise_variance`. The same values generate measurements
+  and populate the GP observation covariance, so this is the matched-noise
+  study rather than a misspecification study.
+
+The pipeline is sequential and proposed-method-only. `--factors` selects a
+subset, `--episodes` overrides the episode count, and `--reuse-raw` skips robot
+simulation while repeating offline evaluation and plotting.
+
 ## Map and simulated truth
 
 | Parameter | Current value | Status | Meaning | Expected effect when changed |
@@ -155,6 +193,14 @@ posterior uncertainty enters only through the separate aerial uncertainty term.
 | `multifidelity.density.normalization_tolerance` | `1e-8` | MF active | Relative/absolute tolerance when checking weighted density integral equals one. | Higher accepts larger floating-point normalization error; lower is stricter and may reject numerically harmless deviations. It does not smooth the field. |
 | `multifidelity.sensor.low_fidelity_smoothing_sigma_cells` | `2.0` | MF active | Gaussian blur sigma used only to create simulator LOW truth from HIGH truth. | Higher makes LOW broader/smoother and moves more structure into discrepancy; zero makes LOW equal HIGH before `rho` scaling. |
 | `multifidelity.sensor.random_seed_offset` | `10000` | MF active | Separates LOW/HIGH sensor RNG streams from the base episode seed. | No monotonic effect; changing it gives different deterministic sensing/noise sequences without changing initial states. |
+
+In multi-fidelity mode, both LOW aerial and HIGH ground sampling always apply
+the coupled simulation's shared ground occupancy raster as a 2-D line-of-sight
+mask. Range and angular FOV filtering occur through the configured sensor
+geometry; candidates whose segment touches an occupied raster-cell square are
+rejected before noise is drawn. There is currently no configuration switch for
+occlusion and no obstacle-height model. Aerial motion may overfly a ground
+obstacle, but that obstacle still occludes the aerial sensor in this 2-D model.
 
 ### Kernel hyperparameter optimization
 

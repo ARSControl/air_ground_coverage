@@ -1,0 +1,23 @@
+# Fast proposed-method-only contract for the parameter-sweep pipeline.
+base_config: configs/multifidelity_composition_smoke.yaml
+
+parameter_sweep:
+  factors:
+    environment_size:
+      - {label: small_7x7, size: [7, 7], ground_local_grid_points: 7}
+      - {label: reference_9x9, reference: true, size: [9, 9], ground_local_grid_points: 9}
+    team_composition:
+      - {label: reference_A1_G1, reference: true, aerial: 1, ground: 1}
+      - {label: A2_G1, aerial: 2, ground: 1}
+    duration:
+      - {label: short, num_steps: 2}
+      - {label: reference, reference: true, num_steps: 4}
+    obstacle_density:
+      - {label: obstacle_free, count: 0, radius: 1.0}
+      - {label: reference_1, reference: true, count: 1, radius: 1.0}
+    sensing_range:
+      - {label: reference, reference: true, aerial: 2.0, ground: 2.0}
+      - {label: full_environment, full_environment: true}
+    measurement_noise:
+      - {label: low, low_variance: 0.0025, high_variance: 0.00025}
+      - {label: reference, reference: true, low_variance: 0.01, high_variance: 0.001}

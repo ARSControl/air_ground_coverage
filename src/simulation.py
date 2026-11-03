@@ -652,6 +652,9 @@ def build_multifidelity_coordinator(
         fov_degrees=float(_get(params, "sensor.fov_degrees", 360.0)),
         noise_variance=float(_get(params, "multifidelity.low_noise_variance", 0.04)),
         rng=np.random.default_rng(low_sequence),
+        obstacle_map=(
+            None if resolved_field_mask is None else np.logical_not(resolved_field_mask)
+        ),
     )
     high_sensor = SimulatedScalarFieldSensor(
         Fidelity.HIGH,
@@ -660,6 +663,9 @@ def build_multifidelity_coordinator(
         fov_degrees=float(_get(ground_params, "sensor.fov_degrees", 90.0)),
         noise_variance=float(_get(params, "multifidelity.high_noise_variance", 1.0e-4)),
         rng=np.random.default_rng(high_sequence),
+        obstacle_map=(
+            None if resolved_field_mask is None else np.logical_not(resolved_field_mask)
+        ),
     )
     return MultifidelitySimulationCoordinator(
         estimator=CentralAsynchronousEstimator(settings),

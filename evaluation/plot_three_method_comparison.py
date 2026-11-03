@@ -30,7 +30,7 @@ from evaluation.comparison_io import (  # noqa: E402
 METHODS = ("multifidelity", "egerstedt", "zhang")
 LABELS = {
     "multifidelity": "Proposed multi-fidelity",
-    "egerstedt": "Egerstedt",
+    "egerstedt": "Rudolph [17]",
     "zhang": "Zhang",
 }
 COLORS = {"multifidelity": "#0072B2", "egerstedt": "#D55E00", "zhang": "#009E73"}

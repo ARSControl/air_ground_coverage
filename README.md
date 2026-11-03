@@ -23,6 +23,8 @@ publishes the most recent valid posterior if an update fails.
   robot.
 - Asynchronous LOW/HIGH observation scheduling and batched GP updates that are
   separate from controller and numerical-integration rates.
+- Obstacle-aware LOW/HIGH sampling with range, angular field-of-view, and
+  conservative raster line-of-sight checks.
 - HIGH-field posterior mean and variance for aerial target construction.
 - Posterior-derived density for ground coverage.
 - HEDAC aerial coverage with Dubins aircraft and Lloyd or MPC ground coverage
@@ -89,6 +91,38 @@ trajectories.
 The composition protocol deploys both robot classes from the lower-left 20% of
 the environment, using deterministic class-specific candidate sequences so
 conditions remain paired as team counts change.
+
+Run the proposed-method-only reviewer parameter sweep with:
+
+```bash
+uv run python evaluation/run_multifidelity_parameter_sweep.py \
+  --config configs/multifidelity_parameter_sweep.yaml \
+  --output-dir output/multifidelity_parameter_sweep
+```
+
+The one-factor-at-a-time study varies environment size, mixed-team
+composition, mission duration, obstacle density, aerial/ground sensing range,
+and matched LOW/HIGH measurement noise. It runs only the central MFGP method;
+no baseline controller is imported or executed. The range sweep includes a
+dynamic full-environment level, and the duration sweep includes a 60-second
+level reserved for later paired baseline work. Use `--factors sensing_range
+duration`, for example, to run a subset, `--episodes N` for development, and
+`--reuse-raw` to recompute evaluation and figures from saved simulations. A
+fast end-to-end check uses
+`configs/multifidelity_parameter_sweep_smoke.yaml`.
+
+Generate combined plots for one metric from an already completed sweep without
+rerunning simulation:
+
+```bash
+uv run python evaluation/plot_multifidelity_parameter_sweep_summary.py \
+  --manifest output/multifidelity_parameter_sweep/manifest.json \
+  --metric final_kl
+```
+
+This writes a six-panel absolute-metric overview and a forest plot of paired
+changes from each factor's reference condition. Any episode-level metric saved
+in the evaluated archives can be selected in place of `final_kl`.
 
 After running the four-method comparison, render one already-saved paired
 episode as ten independent MP4 videos and four companion PNG images without
@@ -299,6 +333,28 @@ Its colors are centralized near the top of
 `GROUND_COLOR`, and the adjacent footprint/outline constants to restyle all
 four panels consistently.
 
+Run the separate full-visibility comparison among the proposed MFGP, Rudolph
+[17] (stored internally under the historical `egerstedt` archive key), and
+standard Zhang with:
+
+```bash
+uv run python evaluation/run_full_visibility_comparison_pipeline.py \
+  --config configs/baseline_comparison_a3_g7.yaml \
+  --zhang-config configs/zhang_comparison.yaml \
+  --num-steps 900 \
+  --episodes 30 \
+  --episode 0 \
+  --output-dir output/full_visibility_comparison_90s
+```
+
+The runner writes a resolved YAML beside the results and sets both aerial and
+ground sensing to 360 degrees with radius at least the map diagonal. It rejects
+obstacle-containing configurations. All methods reuse the same scenario seeds,
+initial states, hidden fields, and physical clock. Because a full-domain ground
+footprint covers the complete map from every position, the coverage-mass metric
+is saturated in this protocol; nearest-ground locational cost and travel remain
+the informative common motion metrics.
+
 Generate the simulation-independent aerial/ground observation-resolution
 illustration with:
 
@@ -359,6 +415,10 @@ This ordering permits a HIGH-fidelity ground observation to change the
 posterior, aerial target density, and subsequent aerial command or trajectory.
 
 ## Documentation
+
+- [Reviewer revision implementation tracker](docs/reviewer_revision_progress.md):
+  progress, acceptance criteria, and evidence log for the parameter sweeps,
+  occlusion-aware sensing, and future hardware demonstration.
 
  equations for the fields, sensors, multi-fidelity GP, densities, controllers,
  dynamics, scheduling, and metrics, with an equation-to-code map.

@@ -1,0 +1,32 @@
+# Proposed-method-only one-factor-at-a-time reviewer sensitivity study.
+base_config: configs/multifidelity_composition.yaml
+
+parameter_sweep:
+  factors:
+    environment_size:
+      - {label: small_30x30, size: [30, 30], ground_local_grid_points: 60}
+      - {label: reference_50x50, reference: true, size: [50, 50], ground_local_grid_points: 100}
+      - {label: large_70x70, size: [70, 70], ground_local_grid_points: 140}
+    team_composition:
+      - {label: A1_G9, aerial: 1, ground: 9}
+      - {label: reference_A2_G8, reference: true, aerial: 2, ground: 8}
+      - {label: A3_G7, aerial: 3, ground: 7}
+      - {label: A5_G5, aerial: 5, ground: 5}
+      - {label: A7_G3, aerial: 7, ground: 3}
+    duration:
+      - {label: short_10s, num_steps: 100}
+      - {label: reference_30s, reference: true, num_steps: 300}
+      - {label: long_60s, num_steps: 600}
+      - {label: long_90s, num_steps: 900}
+    obstacle_density:
+      - {label: obstacle_free, count: 0, radius: 1.0}
+      - {label: reference_5, reference: true, count: 5, radius: 1.0}
+      - {label: dense_15, count: 15, radius: 1.0}
+    sensing_range:
+      - {label: short, aerial: 5.0, ground: 2.5}
+      - {label: reference, reference: true, aerial: 10.0, ground: 5.0}
+      - {label: full_environment, full_environment: true}
+    measurement_noise:
+      - {label: low, low_variance: 0.01, high_variance: 0.00025}
+      - {label: reference, reference: true, low_variance: 0.04, high_variance: 0.001}
+      - {label: high, low_variance: 0.16, high_variance: 0.004}
