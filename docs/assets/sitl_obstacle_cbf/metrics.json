@@ -1,0 +1,7 @@
+{
+  "minimum_inflated_segment_clearance_m": 0.001599475112240789,
+  "changed_commands": 162,
+  "duration_s": 60,
+  "dt_s": 0.05,
+  "note": "Ideal velocity tracking, static truth-weighted Lloyd target; not a SITL flight"
+}

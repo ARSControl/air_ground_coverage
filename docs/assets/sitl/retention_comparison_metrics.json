@@ -1,0 +1,20 @@
+{
+  "250": {
+    "low_retained": 250,
+    "high_retained": 250,
+    "early_region_variance_before": 0.00425817319387977,
+    "early_region_variance_after": 0.8899974730078186,
+    "update_duration_s": 0.06233335900105885,
+    "fit_duration_s": 0.012094689000150538,
+    "prediction_duration_s": 0.01648231100080011
+  },
+  "1000": {
+    "low_retained": 1000,
+    "high_retained": 1000,
+    "early_region_variance_before": 0.00425817319387977,
+    "early_region_variance_after": 0.004258153707692626,
+    "update_duration_s": 0.9459250990003056,
+    "fit_duration_s": 0.3378935939999792,
+    "prediction_duration_s": 0.10702907499944558
+  }
+}

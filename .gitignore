@@ -54,3 +54,6 @@ docs/architecture/*
 !docs/architecture/implementation_baseline_comparison_runner.md
 !docs/architecture/implementation_zhang_baseline.md
 !docs/architecture/implementation_three_method_comparison.md
+
+# Per-host deployment settings
+docker/deployment.local.json

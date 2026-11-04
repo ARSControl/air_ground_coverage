@@ -1,0 +1,14 @@
+name: mfgp_drone
+services:
+  agent:
+    image: ${MFGP_IMAGE:-mfgp-deployment:local}
+    network_mode: host
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+      FASTDDS_BUILTIN_TRANSPORTS: UDPv4
+      MFGP_SCENARIO: /config/scenario.yaml
+      ENABLE_COMMANDS: ${ENABLE_COMMANDS:-0}
+    volumes:
+      - ${MFGP_SCENARIO_FILE:-./scenarios/sitl_three_drone.yaml}:/config/scenario.yaml:ro
+    command: [docker.ros_agent, --vehicle, "${VEHICLE_ID:?Set VEHICLE_ID to this drone's scenario ID}"]
+    restart: "no"

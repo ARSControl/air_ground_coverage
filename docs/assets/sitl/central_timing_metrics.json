@@ -1,0 +1,12 @@
+{
+  "old_command_checks": 14403,
+  "old_command_rejections": 2583,
+  "old_max_target_age_s": 2.4499999999999993,
+  "fixed_command_checks": 14403,
+  "fixed_command_rejections": 0,
+  "fixed_max_target_age_s": 1.4499999999999993,
+  "duration_s": 240.0,
+  "injected_compute_time_s": 1.45,
+  "pose_and_command_limits_unchanged": true,
+  "fixed_publications": 197
+}

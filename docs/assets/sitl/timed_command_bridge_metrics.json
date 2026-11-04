@@ -1,0 +1,7 @@
+{
+  "source": "network-isolated command_bridge_probe",
+  "passed": true,
+  "command_rate_hz": 19.99528694817851,
+  "max_command_gap_s": 0.05028533935546875,
+  "rejection_cases": 7
+}

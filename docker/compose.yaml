@@ -1,0 +1,62 @@
+name: mfgp_deployment
+
+x-build: &build
+  context: ..
+  dockerfile: docker/Dockerfile
+  additional_contexts:
+    mullet_interfaces: ${MULLET_INTERFACES_PATH:-../../mullet_sitl_sim/ws/src/mullet-interfaces}
+
+x-runtime: &runtime
+  image: ${MFGP_IMAGE:-mfgp-deployment:local}
+  network_mode: host
+  environment:
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+    FASTDDS_BUILTIN_TRANSPORTS: UDPv4
+    MFGP_SCENARIO: /config/scenario.yaml
+    ENABLE_COMMANDS: ${ENABLE_COMMANDS:-0}
+  volumes:
+    - ${MFGP_SCENARIO_FILE:-./scenarios/sitl_three_drone.yaml}:/config/scenario.yaml:ro
+  restart: "no"
+
+services:
+  central:
+    <<: *runtime
+    build: *build
+    command: [docker.ros_central]
+  frame-registry:
+    <<: *runtime
+    command: [docker.ros_frame_registry]
+    depends_on: [central]
+  agent-uav1:
+    <<: *runtime
+    command: [docker.ros_agent, --vehicle, uav_1]
+    depends_on: [central, frame-registry]
+  agent-uav2:
+    <<: *runtime
+    command: [docker.ros_agent, --vehicle, uav_2]
+    depends_on: [central, frame-registry]
+  agent-uav3:
+    <<: *runtime
+    command: [docker.ros_agent, --vehicle, uav_3]
+    depends_on: [central, frame-registry]
+  readiness:
+    <<: *runtime
+    profiles: [tools]
+    entrypoint: [/bin/bash, /opt/mfgp/docker/entrypoint.sh, docker.ros_readiness]
+    command: []
+    volumes:
+      - ${MFGP_SCENARIO_FILE:-./scenarios/sitl_three_drone.yaml}:/config/scenario.yaml:ro
+      - ../output/sitl:/artifacts
+  mission:
+    <<: *runtime
+    profiles: [tools]
+    entrypoint: [/bin/bash, /opt/mfgp/docker/entrypoint.sh, docker.ros_timed_mission]
+    command: []
+    volumes:
+      - ${MFGP_SCENARIO_FILE:-./scenarios/sitl_three_drone.yaml}:/config/scenario.yaml:ro
+      - ../output/sitl:/artifacts
+  deployment-smoke:
+    profiles: [smoke]
+    image: ${MFGP_IMAGE:-mfgp-deployment:local}
+    build: *build
+    command: [docker.deployment_smoke]

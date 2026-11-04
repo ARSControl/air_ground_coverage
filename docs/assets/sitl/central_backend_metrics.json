@@ -1,0 +1,30 @@
+{
+  "old_backend": {
+    "numpy": "1.26.4",
+    "scipy": "1.11.4",
+    "blas": "system generic BLAS",
+    "full_budget_update_s": 1.386745042000257,
+    "objective_before": 0.10425415012715261,
+    "objective_after": 0.10382266247899007
+  },
+  "new_backend": {
+    "numpy": "1.26.4",
+    "scipy": "1.13.1",
+    "blas": "OpenBLAS",
+    "numerical_threads": 1,
+    "full_budget_update_s": 0.2265793569968082,
+    "objective_before": 0.10425415012715261,
+    "objective_after": 0.10382266247898998
+  },
+  "isolated_slow_ros": {
+    "injected_delay_s": 1.45,
+    "measured_update_s": 1.450979796001775,
+    "completed_packet_age_on_receipt_s": 0.005957841873168945,
+    "before_after_publication_gap_s": 1.453202486038208
+  },
+  "command_bridge": {
+    "command_rate_hz": 20.000330277927873,
+    "max_command_gap_s": 0.05035066604614258,
+    "rejection_cases": 7
+  }
+}

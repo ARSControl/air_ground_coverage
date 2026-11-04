@@ -1,0 +1,12 @@
+{
+  "source": "network-isolated ROS timed_mission_probe with emulated MULLET services",
+  "requested_duration_s": 1.0,
+  "normal_command_phase_s": 1.0005268589998195,
+  "normal_hold_confirmed": 3,
+  "partial_start_command_phase_s": 0.010766988000341371,
+  "partial_start_hold_confirmed": 3,
+  "cancelled_command_phase_s": 0.20017853499984994,
+  "cancelled_hold_confirmed": 3,
+  "disabled_agents_started": 0,
+  "passed": true
+}

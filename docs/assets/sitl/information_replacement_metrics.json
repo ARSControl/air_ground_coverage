@@ -1,0 +1,43 @@
+{
+  "filter": {
+    "enabled": true,
+    "criterion": "high_information",
+    "on_full": "information",
+    "max_total_samples": 1000,
+    "retained_total": 1000,
+    "received": 1001,
+    "accepted_low": 500,
+    "accepted_high": 501,
+    "redundant": 0,
+    "duplicates": 0,
+    "capacity_rejected": 0,
+    "replaced": 1,
+    "evicted_low": 1,
+    "evicted_high": 0,
+    "replacement_evaluations": 1000,
+    "last_replacement_improvement": 0.0004294954676012652,
+    "last_replacement_objective_before": 0.10417454288698617,
+    "last_replacement_objective_after": 0.10374504741938491,
+    "low_threshold": 0.016072500905958,
+    "high_threshold": 0.016072500905958
+  },
+  "full_replacement_update_s": 0.2170539699982328,
+  "removed_fidelity": "low",
+  "removed_position": [
+    12.0,
+    -8.0
+  ],
+  "high_mean_max_change": 0.33145036417564927,
+  "aerial_target_max_change": 0.00011196053575754172,
+  "aerial_velocities": [
+    [
+      -0.6725491631242637,
+      0.7400524462366519
+    ],
+    [
+      -0.6602794952318866,
+      0.751019965231501
+    ]
+  ],
+  "aerial_velocity_change": 0.016456950601238612
+}

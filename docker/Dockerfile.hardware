@@ -1,0 +1,22 @@
+# Native builds on each host; no simulator, PX4 binary or flight-device access.
+ARG BASE_IMAGE=ros:jazzy-ros-base-noble
+FROM ${BASE_IMAGE}
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential python3-pip python3-colcon-common-extensions \
+    ros-jazzy-rclpy ros-jazzy-std-msgs ros-jazzy-rosidl-default-generators \
+    ros-jazzy-rosidl-default-runtime \
+    && rm -rf /var/lib/apt/lists/*
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+    --ignore-installed --only-binary=:all: \
+    numpy==1.26.4 scipy==1.13.1 numba==0.61.2 scikit-learn==1.6.1 \
+    PyYAML==6.0.2 matplotlib==3.10.1
+COPY --from=mullet_interfaces / /opt/mfgp_ros/src/mullet_interfaces/
+RUN /bin/bash -c 'source /opt/ros/jazzy/setup.bash && cd /opt/mfgp_ros && colcon build --packages-select mullet_interfaces'
+WORKDIR /opt/mfgp
+COPY src/ /opt/mfgp/src/
+COPY docker/ /opt/mfgp/docker/
+ENV PYTHONPATH=/opt/mfgp PYTHONUNBUFFERED=1 MPLBACKEND=Agg \
+    OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1
+ENTRYPOINT ["/bin/bash", "/opt/mfgp/docker/entrypoint.sh"]
+CMD ["docker.deployment_smoke"]

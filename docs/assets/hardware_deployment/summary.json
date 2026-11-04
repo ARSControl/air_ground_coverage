@@ -1,0 +1,17 @@
+{
+  "passed_tests": 44,
+  "smoke": {
+    "high_count": 3,
+    "low_count": 3,
+    "posterior_version": 2,
+    "scenario_hash": "bff2975f66125b81fe67694b028ac38d01136c92960ce0fa1f18f3f1da31fc17",
+    "target_max_abs_change": 0.0001855047533248649
+  },
+  "drone_services": [
+    "agent"
+  ],
+  "laptop_services": [
+    "central",
+    "frame-registry"
+  ]
+}

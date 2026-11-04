@@ -1,0 +1,15 @@
+{
+  "recording_excerpt": true,
+  "recorder_duration_s": 123.49800848960876,
+  "fps": 10,
+  "playback_speed": 4.0,
+  "frames": 310,
+  "encoded_duration_s": 31.0,
+  "posterior_packets": 119,
+  "pose_packets": {
+    "uav_1": 247,
+    "uav_2": 247,
+    "uav_3": 246
+  },
+  "scenario_hash": "22cfc81a1dcea44dc65acb349f597d138eb83fd62ab765d85799598cffd1eba4"
+}

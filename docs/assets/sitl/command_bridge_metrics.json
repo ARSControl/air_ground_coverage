@@ -1,0 +1,7 @@
+{
+  "source": "network-isolated ROS command_bridge_probe, ROS_DOMAIN_ID=101",
+  "passed": true,
+  "command_rate_hz": 20.007083790882557,
+  "max_command_gap_s": 0.05071711540222168,
+  "rejection_cases": 6
+}

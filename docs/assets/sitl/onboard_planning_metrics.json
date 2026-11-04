@@ -1,0 +1,19 @@
+{
+  "ground_velocity_max_abs_errors": [
+    0.0,
+    0.0
+  ],
+  "aerial_velocities": [
+    [
+      0.23397787872132278,
+      0.4418759466966605
+    ],
+    [
+      -0.033547330911593565,
+      0.4988733071519342
+    ]
+  ],
+  "aerial_velocity_change": 0.2735295905162808,
+  "target_max_abs_change": 0.00028869659703252803,
+  "posterior_mean_max_abs_change": 0.609207258123502
+}

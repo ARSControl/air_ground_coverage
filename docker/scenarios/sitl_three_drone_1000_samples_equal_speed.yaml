@@ -1,0 +1,106 @@
+# SITL configuration: MULLET performs takeoff and landing externally.
+schema_version: 1
+scenario_id: sitl_three_drone
+map:
+  frame_id: map
+  axes: north_east
+  origin_m:
+  - -10.0
+  - -10.0
+  resolution_m: 1.0
+  shape_rows_columns:
+  - 61
+  - 61
+  row_direction: east
+  obstacles:
+    kind: circles
+    circles:
+    - center_m:
+      - 25.0
+      - 25.0
+      radius_m: 3.0
+field:
+  kind: gaussian_mixture
+  seed: 123
+  components:
+  - center_m:
+    - 15.0
+    - 15.0
+    sigma_m: 5.0
+    amplitude: 1.0
+  - center_m:
+    - 37.0
+    - 35.0
+    sigma_m: 4.0
+    amplitude: 0.7
+  low_smoothing_sigma_cells: 4.0
+  truth_rho: 0.8
+vehicles:
+- id: uav_1
+  namespace: /uav_1
+  role: ground
+  altitude_m: 5.0
+  map_from_local_ned_xy: null
+  sensor:
+    fidelity: high
+    type: cone
+    range_m: 5.0
+    fov_degrees: 90.0
+    period_s: 0.5
+    sample_count: 3
+    noise_variance: 0.0001
+    seed: 101
+- id: uav_2
+  namespace: /uav_2
+  role: ground
+  altitude_m: 5.0
+  map_from_local_ned_xy: null
+  sensor:
+    fidelity: high
+    type: cone
+    range_m: 5.0
+    fov_degrees: 90.0
+    period_s: 0.5
+    sample_count: 3
+    noise_variance: 0.0001
+    seed: 102
+- id: uav_3
+  namespace: /uav_3
+  role: aerial
+  altitude_m: 10.0
+  map_from_local_ned_xy: null
+  sensor:
+    fidelity: low
+    type: footprint
+    radius_m: 10.0
+    occlusion: false
+    period_s: 0.5
+    sample_count: 3
+    noise_variance: 0.04
+    seed: 103
+estimator:
+  rho: 0.8
+  update_period_s: 1.0
+  jitter: 1.0e-08
+  low_kernel:
+    length_scale_m: 5.0
+    variance: 1.0
+  discrepancy_kernel:
+    length_scale_m: 1.5
+    variance: 0.25
+  retention:
+    max_low_samples: 1000
+    max_high_samples: 1000
+control:
+  command_stream_hz: 20.0
+  planner_period_s: 0.5
+  max_speed_mps: 0.5
+  plan_expiry_s: 2.0
+  altitude_tolerance_m: 0.75
+  geofence_margin_m: 1.0
+  stopping_horizon_s: 2.5
+  require_mission_lease: true
+time:
+  clock_domain: system
+  max_pose_age_s: 1.0
+  max_observation_age_s: 2.0

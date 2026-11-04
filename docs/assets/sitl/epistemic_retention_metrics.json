@@ -1,0 +1,46 @@
+{
+  "newest": {
+    "filter": {
+      "enabled": false,
+      "criterion": "high_information",
+      "max_total_samples": null,
+      "retained_total": 500,
+      "received": 0,
+      "accepted_low": 0,
+      "accepted_high": 0,
+      "redundant": 0,
+      "duplicates": 0,
+      "capacity_rejected": 0,
+      "low_threshold": 0.0,
+      "high_threshold": 0.0
+    },
+    "low_retained": 250,
+    "high_retained": 250,
+    "full_update_max_s": 0.08284910600013973,
+    "full_update_median_s": 0.045011316999989504,
+    "gp_updates": 58,
+    "early_region_final_variance": 0.7002469441589774
+  },
+  "paper_epistemic": {
+    "filter": {
+      "enabled": true,
+      "criterion": "high_information",
+      "max_total_samples": 500,
+      "retained_total": 500,
+      "received": 1035,
+      "accepted_low": 196,
+      "accepted_high": 304,
+      "redundant": 398,
+      "duplicates": 0,
+      "capacity_rejected": 137,
+      "low_threshold": 0.03548402563234178,
+      "high_threshold": 0.03548402563234178
+    },
+    "low_retained": 196,
+    "high_retained": 304,
+    "full_update_max_s": 0.050460454000130994,
+    "full_update_median_s": 0.01777051750013925,
+    "gp_updates": 45,
+    "early_region_final_variance": 0.08618341971344623
+  }
+}

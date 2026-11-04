@@ -1,0 +1,10 @@
+**
+!src/
+!src/**
+!docker/
+!docker/**
+**/__pycache__
+**/*.pyc
+docker/.env
+
+docker/deployment.local.json
