@@ -223,16 +223,56 @@ class BoundedObservationBuffer:
             self.submit(observation)
         return len(candidate)
 
-    def candidate(self) -> tuple[Observation, ...]:
+    @property
+    def pending(self) -> tuple[Observation, ...]:
+        """Immutable view for scheduled, transactional sample admission."""
+        return tuple(entry.observation for entry in self._pending)
+
+    def candidate(
+        self, *, pending_admission=None, retained_admission=None
+    ) -> tuple[Observation, ...]:
         combined = sorted(
             (*self._retained, *self._pending),
             key=lambda entry: entry.insertion_index,
         )
-        selected = self._policy._select_indexed(combined, self._config)
+        if pending_admission is None:
+            if retained_admission is not None:
+                raise ValueError(
+                    "retained admission requires explicit pending admission"
+                )
+            selected = self._policy._select_indexed(combined, self._config)
+        else:
+            mask = tuple(pending_admission)
+            if len(mask) != len(self._pending) or any(
+                type(v) is not bool for v in mask
+            ):
+                raise ValueError(
+                    "admission must contain one boolean per pending sample"
+                )
+            keep = (
+                (True,) * len(self._retained)
+                if retained_admission is None
+                else tuple(retained_admission)
+            )
+            if len(keep) != len(self._retained) or any(
+                type(v) is not bool for v in keep
+            ):
+                raise ValueError(
+                    "retained admission must contain one boolean per retained sample"
+                )
+            selected = tuple(
+                sorted(
+                    (
+                        *(e for e, accept in zip(self._retained, keep) if accept),
+                        *(e for e, accept in zip(self._pending, mask) if accept),
+                    ),
+                    key=lambda e: (e.observation.timestamp, e.insertion_index),
+                )
+            )
+            if len(selected) > self._config.max_samples:
+                raise ValueError("admission exceeds retained-sample capacity")
         observations = tuple(entry.observation for entry in selected)
-        watermark = max(
-            (entry.insertion_index for entry in self._pending), default=-1
-        )
+        watermark = max((entry.insertion_index for entry in self._pending), default=-1)
         self._last_candidate = _CandidateRecord(observations, selected, watermark)
         return observations
 

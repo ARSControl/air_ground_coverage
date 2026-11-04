@@ -207,6 +207,51 @@ class HighFidelityPrediction:
         object.__setattr__(self, "variance", variance)
 
 
+class LowFidelityPrediction(HighFidelityPrediction):
+    """Immutable latent LOW posterior marginals with the same array contract."""
+
+
+@dataclass(frozen=True)
+class JointLatentPrediction:
+    """Immutable mixed LOW/HIGH latent posterior mean and full covariance."""
+
+    mean: FloatArray
+    covariance: FloatArray
+
+    def __post_init__(self):
+        mean = _readonly_vector(self.mean, "mean")
+        covariance = np.array(self.covariance, dtype=float, copy=True)
+        if (
+            covariance.shape != (len(mean), len(mean))
+            or not np.all(np.isfinite(covariance))
+            or not np.allclose(covariance, covariance.T, atol=1e-10)
+            or np.any(np.diag(covariance) < 0)
+        ):
+            raise ValueError("invalid joint latent covariance")
+        covariance.setflags(write=False)
+        object.__setattr__(self, "mean", mean)
+        object.__setattr__(self, "covariance", covariance)
+
+
+@dataclass(frozen=True)
+class ReplacementScores:
+    """Exact weighted HIGH-variance improvement for each old/new swap."""
+
+    improvement: FloatArray
+    objective_before: float
+
+    def __post_init__(self):
+        values = np.array(self.improvement, dtype=float, copy=True)
+        if values.ndim != 2 or not np.all(np.isfinite(values)):
+            raise ValueError("invalid replacement improvements")
+        objective = _finite_scalar(self.objective_before, "objective_before")
+        if objective < 0:
+            raise ValueError("negative variance objective")
+        values.setflags(write=False)
+        object.__setattr__(self, "improvement", values)
+        object.__setattr__(self, "objective_before", objective)
+
+
 class MultiFidelityGaussianProcess:
     """Zero-mean autoregressive GP with fixed or empirically fitted parameters.
 
@@ -256,6 +301,7 @@ class MultiFidelityGaussianProcess:
         self._cholesky: FloatArray | None = None
         self._alpha = np.empty(0, dtype=float)
         self._effective_jitter = 0.0
+        self._replacement_cache = None
 
     @property
     def kernel_hyperparameters(self) -> tuple[float, float, float, float]:
@@ -336,6 +382,7 @@ class MultiFidelityGaussianProcess:
         self._cholesky = candidate_cholesky
         self._alpha = candidate_alpha
         self._effective_jitter = candidate_effective_jitter
+        self._replacement_cache = None
         return self
 
     def fit_hyperparameters(
@@ -473,13 +520,26 @@ class MultiFidelityGaussianProcess:
             query
         ) + self._discrepancy_diagonal(query)
 
+        cross_covariance = self._training_to_high_covariance(query)
+        return self._predict_marginals(query, prior_variance, cross_covariance)
+
+    def predict_low(self, query_positions: ArrayLike) -> LowFidelityPrediction:
+        """Predict latent f_L conditioned on both LOW and HIGH observations."""
+        query = _positions(query_positions, "query_positions")
+        cross = np.vstack(
+            (
+                self.low_kernel.covariance(self._low_positions, query),
+                self.rho * self.low_kernel.covariance(self._high_positions, query),
+            )
+        )
+        result = self._predict_marginals(query, self.low_kernel.diagonal(query), cross)
+        return LowFidelityPrediction(result.mean, result.variance)
+
+    def _predict_marginals(self, query, prior_variance, cross_covariance):
         if self._cholesky is None:
             return HighFidelityPrediction(
-                mean=np.zeros(query.shape[0], dtype=float),
-                variance=prior_variance,
+                mean=np.zeros(len(query)), variance=prior_variance
             )
-
-        cross_covariance = self._training_to_high_covariance(query)
         mean = cross_covariance.T @ self._alpha
         projected = solve_triangular(
             self._cholesky,
@@ -499,6 +559,166 @@ class MultiFidelityGaussianProcess:
             )
         variance = np.maximum(variance, 0.0)
         return HighFidelityPrediction(mean=mean, variance=variance)
+
+    def predict_joint_latent(
+        self, query_positions, high_fidelity
+    ) -> JointLatentPrediction:
+        """Mixed latent posterior; high_fidelity is a boolean flag per position."""
+        query = _positions(query_positions, "query_positions")
+        high = np.asarray(high_fidelity)
+        if high.dtype != np.bool_ or high.shape != (len(query),):
+            raise ValueError(
+                "high_fidelity must be a boolean vector matching positions"
+            )
+        scale = np.where(high, self.rho, 1.0)
+        covariance = self.low_kernel.covariance(query, query) * np.outer(scale, scale)
+        covariance += self._discrepancy_covariance(query, query) * np.outer(high, high)
+        mean = np.zeros(len(query))
+        if self._cholesky is not None:
+            cross = np.vstack(
+                (
+                    self.low_kernel.covariance(self._low_positions, query) * scale,
+                    self.rho
+                    * self.low_kernel.covariance(self._high_positions, query)
+                    * scale
+                    + self._discrepancy_covariance(self._high_positions, query) * high,
+                )
+            )
+            mean = cross.T @ self._alpha
+            projected = solve_triangular(
+                self._cholesky, cross, lower=True, check_finite=False
+            )
+            covariance -= projected.T @ projected
+        covariance = 0.5 * (covariance + covariance.T)
+        diagonal = np.diag(covariance)
+        if np.any(
+            diagonal
+            < -1e-10
+            * max(
+                1.0,
+                self.low_kernel.variance,
+                self.rho**2 * self.low_kernel.variance
+                + self.discrepancy_kernel.variance,
+            )
+        ):
+            raise FloatingPointError("negative joint latent variance")
+        covariance[np.diag_indices(len(query))] = np.maximum(diagonal, 0.0)
+        return JointLatentPrediction(mean, covariance)
+
+    def score_replacements(
+        self,
+        query_positions,
+        integration_weights,
+        candidate_positions,
+        candidate_high,
+        candidate_noise,
+    ):
+        """Score every one-for-one swap using the current Cholesky factor.
+
+        Rows follow retained [LOW,HIGH] training order; columns follow new
+        candidates. No candidate GP is fitted and no inverse matrix is formed.
+        Precision diagonals are obtained by blocked triangular basis solves.
+        """
+        if self._cholesky is None:
+            raise ValueError("replacement scoring requires a fitted GP")
+        query = _positions(query_positions, "query_positions")
+        weights = _values(integration_weights, len(query), "integration_weights")
+        if np.any(weights < 0) or not np.isfinite(weights.sum()) or weights.sum() <= 0:
+            raise ValueError("replacement weights require positive total mass")
+        weights = weights / weights.sum()
+        candidates = _positions(candidate_positions, "candidate_positions")
+        high = np.asarray(candidate_high)
+        if high.dtype != np.bool_ or high.shape != (len(candidates),):
+            raise ValueError("candidate_high must be a matching boolean vector")
+        noise = _noise_variances(candidate_noise, len(candidates), "candidate_noise")
+        factor = self._cholesky
+        projected_query, influence, objective, precision_diagonal, norm_old = (
+            self._replacement_geometry(query, weights)
+        )
+        scale = np.where(high, self.rho, 1.0)
+        cross_new = np.vstack(
+            (
+                self.low_kernel.covariance(self._low_positions, candidates) * scale,
+                self.rho
+                * self.low_kernel.covariance(self._high_positions, candidates)
+                * scale
+                + self._discrepancy_covariance(self._high_positions, candidates) * high,
+            )
+        )
+        projected_new = solve_triangular(
+            factor, cross_new, lower=True, check_finite=False
+        )
+        coefficients = solve_triangular(
+            factor.T, projected_new, lower=False, check_finite=False
+        )
+        prior_new = scale**2 * self.low_kernel.diagonal(
+            candidates
+        ) + high * self._discrepancy_diagonal(candidates)
+        latent_variance = prior_new - np.einsum(
+            "ij,ij->j", projected_new, projected_new
+        )
+        if np.any(latent_variance < -1e-10 * np.maximum(1.0, prior_new)):
+            raise FloatingPointError("negative candidate variance during replacement")
+        denominator = np.maximum(latent_variance, 0.0) + noise + self._effective_jitter
+        prior_cross = self.rho * self.low_kernel.covariance(query, candidates) * scale
+        prior_cross += self._discrepancy_covariance(query, candidates) * high
+        posterior_cross = prior_cross - projected_query.T @ projected_new
+        norm_new = np.einsum("ij,i,ij->j", posterior_cross, weights, posterior_cross)
+        gain = norm_new / denominator
+        cross_terms = influence @ (weights[:, None] * posterior_cross)
+        ratio = coefficients / denominator
+        numerator = norm_old[:, None] - 2 * ratio * cross_terms + ratio**2 * norm_new
+        removal_loss = np.maximum(numerator, 0.0) / (
+            precision_diagonal[:, None] + coefficients**2 / denominator
+        )
+        return ReplacementScores(gain[None, :] - removal_loss, objective)
+
+    def _replacement_geometry(self, query, weights):
+        """Cache one grid/factor geometry; invalidated by successful refitting."""
+        signature = (
+            id(self._cholesky),
+            self.rho,
+            self.kernel_hyperparameters,
+            self.discrepancy_enabled,
+            self._effective_jitter,
+        )
+        cache = self._replacement_cache
+        if (
+            cache is not None
+            and cache[0] == signature
+            and np.array_equal(query, cache[1])
+            and np.array_equal(weights, cache[2])
+        ):
+            return cache[3]
+        factor = self._cholesky
+        count = len(factor)
+        cross_query = self._training_to_high_covariance(query)
+        projected_query = solve_triangular(
+            factor, cross_query, lower=True, check_finite=False
+        )
+        influence = solve_triangular(
+            factor.T, projected_query, lower=False, check_finite=False
+        )
+        prior = self.rho**2 * self.low_kernel.diagonal(
+            query
+        ) + self._discrepancy_diagonal(query)
+        variance = np.maximum(
+            prior - np.einsum("ij,ij->j", projected_query, projected_query), 0.0
+        )
+        objective = float(weights @ variance)
+        precision_diagonal = np.empty(count)
+        for start in range(0, count, 64):
+            width = min(64, count - start)
+            basis = np.zeros((count, width))
+            basis[start + np.arange(width), np.arange(width)] = 1.0
+            solved = solve_triangular(factor, basis, lower=True, check_finite=False)
+            precision_diagonal[start : start + width] = np.einsum(
+                "ij,ij->j", solved, solved
+            )
+        norm_old = np.einsum("ij,j,ij->i", influence, weights, influence)
+        values = (projected_query, influence, objective, precision_diagonal, norm_old)
+        self._replacement_cache = (signature, query.copy(), weights.copy(), values)
+        return values
 
     def _training_covariance(
         self,

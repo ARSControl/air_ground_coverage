@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 import math
 from time import perf_counter
@@ -11,6 +11,7 @@ from typing import Iterable
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from .epistemic_sample_filter import EpistemicFilterSettings, select_samples
 from .density import normalize_nonnegative_density, positive_part, validate_density
 from .multifidelity_gp import (
     KernelHyperparameterBounds,
@@ -114,6 +115,10 @@ class EstimatorSettings:
         default_factory=HyperparameterOptimizationSettings
     )
     publish_low_only_projection: bool = False
+    sample_filter: EpistemicFilterSettings = field(
+        default_factory=EpistemicFilterSettings
+    )
+    total_retention: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.gp, MultiFidelityGaussianProcess):
@@ -130,6 +135,37 @@ class EstimatorSettings:
             )
         if not isinstance(self.publish_low_only_projection, bool):
             raise TypeError("publish_low_only_projection must be a boolean")
+        if not isinstance(self.sample_filter, EpistemicFilterSettings):
+            raise TypeError("sample_filter must be EpistemicFilterSettings")
+        if self.total_retention is not None:
+            if (
+                isinstance(self.total_retention, bool)
+                or not isinstance(self.total_retention, int)
+                or self.total_retention < 1
+                or not self.sample_filter.enabled
+            ):
+                raise ValueError(
+                    "shared retention requires a positive integer cap and enabled filter"
+                )
+            if (
+                min(self.low_retention.max_samples, self.high_retention.max_samples)
+                < self.total_retention
+            ):
+                raise ValueError(
+                    "internal buffer capacities must accommodate the shared budget"
+                )
+        if self.sample_filter.on_full == "information" and (
+            not self.sample_filter.enabled
+            or self.total_retention is None
+            or self.sample_filter.criterion != "high_information"
+        ):
+            raise ValueError(
+                "information replacement requires shared HIGH-information filtering"
+            )
+        if self.sample_filter.enabled and (
+            self.low_retention.min_separation or self.high_retention.min_separation
+        ):
+            raise ValueError("paper filter requires zero spatial separation")
         query_points = _readonly_float_array(self.query_points, "query_points", ndim=2)
         if query_points.shape[1:] != (2,):
             raise ValueError("query_points must have shape (N, 2)")
@@ -362,6 +398,143 @@ class CentralAsynchronousEstimator:
         self._gp = settings.gp
         self._latest_posterior: PosteriorSnapshot | None = None
         self._version = 0
+        self._filter_diagnostics = dict(
+            received=0,
+            accepted_low=0,
+            accepted_high=0,
+            redundant=0,
+            duplicates=0,
+            capacity_rejected=0,
+            replaced=0,
+            evicted_low=0,
+            evicted_high=0,
+            replacement_evaluations=0,
+            last_replacement_improvement=0.0,
+            last_replacement_objective_before=None,
+            last_replacement_objective_after=None,
+            low_threshold=0.0,
+            high_threshold=0.0,
+        )
+
+    @property
+    def filter_diagnostics(self):
+        return dict(
+            enabled=self.settings.sample_filter.enabled,
+            criterion=self.settings.sample_filter.criterion,
+            on_full=self.settings.sample_filter.on_full,
+            max_total_samples=self.settings.total_retention,
+            retained_total=self.low_sample_count + self.high_sample_count,
+            **self._filter_diagnostics,
+        )
+
+    def _record_filter_selection(self, selection, pending):
+        if selection is None:
+            return
+        self._filter_diagnostics["received"] += len(pending)
+        for fidelity, key in (
+            (Fidelity.LOW, "accepted_low"),
+            (Fidelity.HIGH, "accepted_high"),
+        ):
+            self._filter_diagnostics[key] += sum(
+                accept and o.fidelity is fidelity
+                for accept, o in zip(selection.accepted, pending)
+            )
+        for key in (
+            "redundant",
+            "duplicates",
+            "capacity_rejected",
+            "replaced",
+            "evicted_low",
+            "evicted_high",
+            "replacement_evaluations",
+        ):
+            self._filter_diagnostics[key] += getattr(selection, key)
+        if selection.replaced:
+            self._filter_diagnostics["last_replacement_objective_before"] = (
+                selection.replacement_objective_before
+            )
+            self._filter_diagnostics["last_replacement_objective_after"] = (
+                selection.replacement_objective_after
+            )
+            self._filter_diagnostics["last_replacement_improvement"] = (
+                selection.replacement_objective_before
+                - selection.replacement_objective_after
+            )
+        self._filter_diagnostics["low_threshold"] = selection.low_threshold
+        self._filter_diagnostics["high_threshold"] = selection.high_threshold
+
+    def _replacement_tolerance(self, objective):
+        return max(
+            self.settings.sample_filter.replacement_min_improvement,
+            1e-12 * max(1.0, abs(objective)),
+        )
+
+    def _try_replacement(self, selection, pending):
+        low_keep = [True] * self.low_sample_count
+        high_keep = [True] * self.high_sample_count
+        if (
+            self.settings.sample_filter.on_full != "information"
+            or not selection.capacity_candidates
+            or self.low_sample_count + self.high_sample_count
+            < self.settings.total_retention
+        ):
+            return selection, low_keep, high_keep
+        indices = selection.capacity_candidates
+        candidates = [pending[i] for i in indices]
+        weights = self.settings.integration_weights
+        if self.settings.mask is not None:
+            weights = np.where(self.settings.mask, weights, 0.0)
+        scores = self._gp.score_replacements(
+            self.settings.query_points,
+            weights,
+            np.asarray([o.position for o in candidates]),
+            np.array([o.fidelity is Fidelity.HIGH for o in candidates]),
+            np.asarray([o.noise_variance for o in candidates]),
+        )
+        selection = replace(selection, replacement_evaluations=scores.improvement.size)
+        old, new = np.unravel_index(
+            np.argmax(scores.improvement), scores.improvement.shape
+        )
+        if scores.improvement[old, new] <= self._replacement_tolerance(
+            scores.objective_before
+        ):
+            return selection, low_keep, high_keep
+        accepted = list(selection.accepted)
+        accepted[indices[new]] = True
+        if old < self.low_sample_count:
+            low_keep[old] = False
+        else:
+            high_keep[old - self.low_sample_count] = False
+        return (
+            replace(
+                selection,
+                accepted=tuple(accepted),
+                replaced=1,
+                evicted_low=int(old < self.low_sample_count),
+                evicted_high=int(old >= self.low_sample_count),
+                capacity_rejected=selection.capacity_rejected - 1,
+                replacement_objective_before=scores.objective_before,
+            ),
+            low_keep,
+            high_keep,
+        )
+
+    def _commit_filtered_only(self, selection, pending, timestamp, message):
+        low = self._low_buffer.candidate(
+            pending_admission=(False,) * len(self._low_buffer.pending)
+        )
+        high = self._high_buffer.candidate(
+            pending_admission=(False,) * len(self._high_buffer.pending)
+        )
+        self._low_buffer.commit(low)
+        self._high_buffer.commit(high)
+        self._record_filter_selection(selection, pending)
+        return UpdateReport(
+            status=UpdateStatus.NO_NEW_DATA,
+            timestamp=timestamp,
+            version=self._version,
+            message=message,
+        )
 
     @property
     def latest_posterior(self) -> PosteriorSnapshot | None:
@@ -409,9 +582,66 @@ class CentralAsynchronousEstimator:
                 message="no pending observations",
             )
 
-        low_candidate = self._low_buffer.candidate()
-        high_candidate = self._high_buffer.candidate()
+        selection = None
+        pending = ()
         try:
+            if self.settings.sample_filter.enabled:
+                low_pending = self._low_buffer.pending
+                pending = low_pending + self._high_buffer.pending
+                positions = np.asarray([o.position for o in pending])
+                flags = np.array([o.fidelity is Fidelity.HIGH for o in pending])
+                common_high = (
+                    self.settings.sample_filter.criterion == "high_information"
+                )
+                joint = self._gp.predict_joint_latent(
+                    np.vstack((positions, positions)) if common_high else positions,
+                    np.concatenate((flags, np.ones(len(pending), dtype=bool)))
+                    if common_high
+                    else flags,
+                )
+                n = len(pending)
+                query = self.settings.query_points
+                if self.settings.mask is not None:
+                    query = query[self.settings.mask]
+                high_mean = self._gp.predict_high(query).mean
+                selection = select_samples(
+                    pending,
+                    joint.covariance[:n, :n],
+                    low_mean=high_mean
+                    if common_high
+                    else self._gp.predict_low(query).mean,
+                    high_mean=high_mean,
+                    high_cross_covariance=joint.covariance[n:, :n]
+                    if common_high
+                    else None,
+                    max_total=self.settings.total_retention,
+                    settings=self.settings.sample_filter,
+                    retained=self._low_buffer.retained + self._high_buffer.retained,
+                    max_low=self.settings.low_retention.max_samples,
+                    max_high=self.settings.high_retention.max_samples,
+                    jitter=self._gp.effective_jitter or self._gp.jitter,
+                )
+                selection, low_keep, high_keep = self._try_replacement(
+                    selection, pending
+                )
+                low_candidate = self._low_buffer.candidate(
+                    pending_admission=selection.accepted[: len(low_pending)],
+                    retained_admission=low_keep,
+                )
+                high_candidate = self._high_buffer.candidate(
+                    pending_admission=selection.accepted[len(low_pending) :],
+                    retained_admission=high_keep,
+                )
+                if not any(selection.accepted):
+                    return self._commit_filtered_only(
+                        selection,
+                        pending,
+                        timestamp,
+                        "all pending observations filtered",
+                    )
+            else:
+                low_candidate = self._low_buffer.candidate()
+                high_candidate = self._high_buffer.candidate()
             candidate_gp = self._new_candidate_gp()
             low_positions, low_values, low_noise = _observation_arrays(low_candidate)
             high_positions, high_values, high_noise = _observation_arrays(
@@ -460,6 +690,32 @@ class CentralAsynchronousEstimator:
                 if self.settings.mask is None
                 else self.settings.mask
             )
+            if selection is not None and selection.replaced:
+                objective_weights = np.where(
+                    included, self.settings.integration_weights, 0.0
+                )
+                after = float(
+                    np.average(prediction.variance, weights=objective_weights)
+                )
+                before = selection.replacement_objective_before
+                if after >= before - self._replacement_tolerance(before):
+                    rejected = replace(
+                        selection,
+                        accepted=(False,) * len(pending),
+                        replaced=0,
+                        evicted_low=0,
+                        evicted_high=0,
+                        capacity_rejected=selection.capacity_rejected + 1,
+                        replacement_objective_before=None,
+                        replacement_objective_after=None,
+                    )
+                    return self._commit_filtered_only(
+                        rejected,
+                        pending,
+                        timestamp,
+                        "replacement rejected by posterior verification",
+                    )
+                selection = replace(selection, replacement_objective_after=after)
             weighted_mass = float(
                 np.sum(
                     np.where(included, nonnegative_mean, 0.0)
@@ -547,6 +803,7 @@ class CentralAsynchronousEstimator:
 
             self._low_buffer.commit(low_candidate)
             self._high_buffer.commit(high_candidate)
+            self._record_filter_selection(selection, pending)
             self._gp = candidate_gp
             self._version = next_version
             self._latest_posterior = snapshot

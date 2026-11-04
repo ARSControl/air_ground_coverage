@@ -1115,3 +1115,777 @@ values use state $K$; time averages use trapezoidal integration over the full
 `evaluation/plot_four_method_comparison.py`,
 `evaluation/plot_four_method_trajectories.py`, and
 `evaluation/run_four_method_comparison_pipeline.py`.
+# Shared-reference registration of aligned local frames
+
+The standalone deployment registration helper assumes aligned horizontal NED
+axes and simultaneous, finite local positions $p_i$ and shared-reference
+positions $g_i$. For reference vehicle $r$, it computes
+
+$$
+t_i=(g_i-g_r)-(p_i-p_r),\qquad p_i^{\mathrm{common}}=p_i+t_i,
+\qquad p_i=p_i^{\mathrm{common}}-t_i.
+$$
+
+Thus $t_r=0$. `src/core/common_frame.py` implements this translation using one
+snapshot per vehicle; it does not estimate alignment, timestamps, uncertainty,
+frame resets, or reference quality. Adapters must validate those assumptions.
+This helper is not yet integrated into the simulator or a deployment service.
+
+`src/core/global_reference.py` supplies a separate WGS84 local tangent
+projection. For latitude $\phi$, longitude $\lambda$, ellipsoidal height $h$,
+semi-major axis $a=6378137$ m and squared eccentricity
+$e^2=0.0066943799901413165$, let $N=a/\sqrt{1-e^2\sin^2\phi}$ and
+$X=((N+h)\cos\phi\cos\lambda,(N+h)\cos\phi\sin\lambda,
+(N(1-e^2)+h)\sin\phi)$. The returned coordinates are the dot products of
+$X-X_r$ with the reference-frame north vector
+$(-\sin\phi_r\cos\lambda_r,-\sin\phi_r\sin\lambda_r,\cos\phi_r)$ and east
+vector $(-\sin\lambda_r,\cos\lambda_r,0)$. It accepts ellipsoidal heights;
+MULLET heartbeat altitude is documented as mean sea level and cannot be
+silently substituted. This helper neither synchronizes nor validates a global
+position source; the ROS frame registry uses it to supply deployment agents.
+
+`src/core/registration_readiness.py` additionally checks an indexed window of
+pre-synchronized paired positions. Each vehicle has the same count $K\ge2$;
+timestamps strictly increase, lie in $[t_{now}-A,t_{now}]$, and across-vehicle
+timestamp range at each index does not exceed $S$. For both local and shared
+positions, each sample must lie within distance $D$ of its own window mean.
+The helper registers the two means with the equation above and records each
+vehicle's unchanged horizontal reset counter. A counter change invalidates a
+subsequent match. The caller is responsible for paired-source synchronization,
+clock domains, axis alignment, absolute localization accuracy and reset-counter
+validity; stationarity is not an accuracy guarantee.
+
+## Prototype unicycle circular-obstacle CBF speed filter
+
+For a unicycle with position $p$, heading $\theta$, and signed speed $v$, let
+$e=(\cos\theta,\sin\theta)$ and inflated circle $i$ have center $c_i$ and
+radius $R_i>0$. The prototype in `src/core/unicycle_cbf.py` defines
+$h_i=\|p-c_i\|^2-R_i^2$ and enforces the instantaneous continuous-time
+inequalities
+
+$$
+2(p-c_i)^\top e\,v\ge-\alpha h_i,\qquad -v_{max}\le v\le v_{max}.
+$$
+
+It intersects these scalar half-spaces and clips the nominal speed into the
+resulting interval, or reports infeasibility without returning a speed. For
+coefficients of absolute value at most $10^{-12}$ it treats the coefficient as
+zero. Heading commands, boundaries, inter-robot separation, discretization,
+tracking and uncertainty are not handled. This standalone prototype is not
+integrated into the simulator and provides no discrete-time or flight safety
+guarantee; the existing ground controller remains unchanged.
+
+The optional standalone `guard_unicycle_step` models the repository's
+heading-first integrator with $d=v\Delta t(\cos(\theta+\omega\Delta t),
+\sin(\theta+\omega\Delta t))$. For each circle it projects its center onto
+the closed segment $p+sd$, $s\in[0,1]$. A segment touching an inflated circle
+suppresses translation; a starting point inside or on a circle reports
+infeasibility. It does not handle map boundaries or physical tracking, and is
+not integrated with any controller. The continuous CBF condition alone can
+permit a discrete-time obstacle crossing when a command is held too long.
+
+The limited offline pilot `evaluation/obstacle_policy_pilot.py` measures minimum
+sampled circular clearance $\min_k(\|p_k-c\|-R)$, terminal distance
+$\|p_K-p_{goal}\|$, and the number of executed speeds below $10^{-3}$ in
+absolute value. It uses the existing raster guard for both policies, adds the
+existing bounded repulsion for one, and applies the prototype circular CBF and
+segment guard for the other. These point-sampled metrics do not establish
+continuous clearance, coverage performance, or physical flight safety.
+
+## Deployment field-service sampling
+
+The standalone `src/core/deployment_field_service.py` maps a metric sample
+request position $p$ to grid coordinates $u=(p-o)/r$ using origin $o$ and
+positive resolution $r$. It invokes the existing seeded area-uniform sector
+sensor with range divided by $r$; accepted grid positions $u_s$ become map
+positions $p_s=o+ru_s$. The existing sensor samples the nearest rounded raster
+cell and adds configured Gaussian noise. HIGH or LOW field selection and
+optional raster line-of-sight are per sensor. An unoccluded 360-degree sensor
+represents the high-altitude footprint. Identical per-vehicle request IDs and
+payloads replay the same cached observations; conflicting duplicates and cache
+overflow are rejected. The deployment runtime connects this in-memory component to scenario loading,
+central estimator submission and the ROS wrapper; clock validation and
+physical-flight validation remain separate responsibilities.
+
+The standalone manifest builder `src/core/deployment_scenario.py` defines the
+HIGH raster at grid center $q$ as $\sum_j a_j\exp(-\|q-c_j\|^2/(2s_j^2))$.
+A raster cell is occupied when its center is within a declared circular
+obstacle. It applies `build_fidelity_fields` to the entire HIGH raster without
+masking obstacles, so the unoccluded LOW sensor can sample over virtual
+obstacles; HIGH visibility uses the occupancy raster. It hashes the canonical
+JSON form of the supplied manifest, including placeholder settings. This is not
+a resolved configuration or asset-hash protocol, nor flight-readiness validation.
+
+The standalone `src/core/deployment_estimator.py` constructs the existing
+central MFGP on an evenly spaced map grid with product trapezoidal integration
+weights, without an obstacle density mask. Batch submission queues existing
+`Observation` values; a due update at time $t$ invokes the existing central
+estimator at most once and sets the next eligible time to $t+T$, rather than
+catching up missed periods. A due update is rejected while pending observations
+have timestamps later than $t$. Existing GP fitting and posterior publication
+equations and failure preservation remain unchanged. These are sequential
+in-memory semantics, not a clock synchronization or ROS transport guarantee.
+The adapter's `aerial_target` delegates to the existing `build_aerial_target`
+using posterior density and variance with default interest weight $1$ and
+uncertainty weight $0.25$. It does not yet drive a coverage controller.
+
+The ROS agent sampling path schedules requests at the sensor period specified
+in the manifest. With a currently published offset $t_i$ it transforms heartbeat local
+position $p_i$ to $p_i+t_i$, preserving heading under the assumed aligned axes.
+It sends only when the heartbeat is valid, armed, not landed, in HOLD or
+MISSION, and $0\le t_{now}-t_{heartbeat}\le1$ second; the central status hash
+must match the local manifest. The offset, shared clock, heading alignment and
+frame-reset validity are not established by this sampling gate. Command
+publication is a separate, explicitly enabled path described below.
+
+`docker/deployment_frame_registry.py` estimates $t_i$ from paired heartbeat
+snapshots using the aligned-frame equation above, with latitude/longitude
+projected onto the WGS84 ellipsoid at zero height for both vehicles. It accepts
+successive pairs within 0.25 s timestamp skew, each at most 2 s old, and
+requires five pairs whose offset estimates and both local-position windows
+deviate no more than 0.3 m from their respective means. The accepted offset is
+the mean of the five estimates. A relative inconsistency exceeding 1 m clears
+the affected offset; a reference inconsistency exceeding 1 m, reference
+heartbeat sequence restart, or reference localization loss after initialization
+latches all registration off until a full deployment restart. The
+registry publishes currently fresh offsets every 0.25 s with a 0.75 s expiry;
+agents discard missing, mismatched, or expired offsets. This is a 2D
+approximation using heartbeat snapshot timestamps, not a verified measure of
+global-position accuracy or synchronization, and it does not detect every
+local-origin reset.
+
+`docker/deployment_hedac_planner.py` provides an experimental aerial
+adapter. It maps metric position to an obstacle-free planner grid by
+$u=(p-o)/r$, updates the existing HEDAC coverage at that measured position,
+normalizes the supplied target with the existing HEDAC validator, advances the
+existing heat discretization a fixed 40 times per call by default, and returns
+$v=v_{max}\nabla h/\|\nabla h\|$ using the existing HEDAC gradient routine
+(zero gradient yields zero velocity). It does not integrate or command a vehicle,
+and its default parameters and update rate are not flight-validated.
+
+The onboard aerial agent calls this adapter every $0.5$ seconds when
+both a map pose and posterior target have matching scenario identity and ages
+between zero and two seconds. It requires an evenly spaced square grid,
+uses the configured aerial role speed limit, and publishes a proposed velocity
+with an expiry two seconds later. It does not send MULLET commands. The pose
+agent publishes its existing validated sampling pose separately for this path;
+this does not establish frame-registration or clock correctness.
+
+`docker/deployment_ground_planner.py` implements proposal-only weighted
+Voronoi coverage. Each query point $q_j$ is assigned to the closest ground-role
+position (ties go to the first vehicle); for weights $w_j$ and HIGH density
+$\rho_j$, cell $i$ has centroid $c_i=\sum_{j\in V_i}w_j\rho_jq_j/\sum_{j\in V_i}w_j\rho_j$,
+or its current position when the mass is at most machine epsilon. With
+distance $d_i=\|c_i-p_i\|$ and heading error $\theta_i^*-\theta_i$, the
+proposed signed speed is $\operatorname{clip}(k d_i\cos(\theta_i^*-\theta_i),-v_{max},v_{max})$;
+the map-frame velocity is that speed times $(\cos\theta_i,\sin\theta_i)$.
+Each onboard ground planner requires all configured ground poses and the HIGH
+posterior to be at most two seconds old and runs every 0.5 seconds with
+$k=1$ and the configured ground role speed limit. These are proposals only, with no obstacle
+repulsion, safety filter, heading-rate controller or MULLET command output.
+
+The optional agent command bridge (`docker/ros_agent.py` and
+`docker/deployment_command_gate.py`) runs at 20 Hz. A proposal must match the
+vehicle and scenario, have $t_{creation}\le t<t_{expiry}$ and lifespan at most
+two seconds, and satisfy $\|v\|\le v_{max,r_i}$. A current registered offset,
+heartbeat age at most one second, valid localization, armed/not-landed state,
+no PX4 failsafe and MULLET MISSION are required. With aligned NED axes velocity
+needs no translation; planar VELOCITY uses NaN z and optional target yaw.
+Invalid conditions suppress publication, relying on MULLET's timeout. The
+bridge does not implement a general collision-avoidance safety filter, mission
+start, or takeoff/landing. Its additional map-bound check is described below.
+
+
+## Three-drone SITL configuration and readiness
+
+`docker/scenarios/sitl_three_drone.yaml` defines a 61-by-61 field grid with
+one-metre spacing and map bounds $[-10,50]$ on north and east. The central
+estimator uses 21 points per axis (3 m spacing) with the previously defined
+product trapezoidal weights. The two ground-role target local heights are
+5 m and the aerial-role height is 10 m. The ROS processes consume one shared
+mounted scenario and `docker/deployment_settings.py` validates the deployment
+rates, limits, unique IDs, namespaces, and heights. These settings do not
+change the original Python simulation configurations.
+
+For each axis $d$, `docker/deployment_command_gate.py` additionally requires
+
+$$
+b_d^-+m\le p_d\le b_d^+-m,\qquad
+b_d^-+m\le p_d+H v_d\le b_d^+-m,
+$$
+
+with margin $m=1$ m and projection horizon $H=2.5$ s in this SITL scenario.
+The agent also requires $|-z_{local}-h_{role}|\le0.75$ m, a fresh matching
+central status, the configured MULLET namespace and heartbeat schema 3, and a
+proposal from the current frame-registration session. The registry changes
+its session generation on detected invalidation; both planners copy the
+pose session into proposals, and the ground planner rejects mixed sessions.
+These checks are a finite-horizon command guard, not a guarantee about actual
+tracking or obstacle clearance.
+
+The central ROS wrapper rejects sampling requests older than 2 s or dated in
+the future. Agent commands and local status expire independently from the
+1 Hz GP update schedule. `docker/deployment_readiness.py` evaluates current
+frame offsets, poses, altitude/state diagnostics, both retained fidelities,
+and proposals. `docker/ros_readiness.py` requires three successful evaluations
+at 0.5 s intervals; MISSION checks additionally require observed fresh command
+traffic. It records existing message values and command inter-arrival statistics;
+it does not control the vehicles. Readiness is an operational SITL check,
+not validation for physical flight. `docker/plot_readiness.py` displays those
+recorded arrays without rerunning estimation or control.
+
+## Fixed-duration SITL mission and command lease
+
+`docker/timed_mission.py` and `docker/ros_timed_mission.py` define an explicit
+mission scheduler. After three ready checks at 0.5 s intervals, all configured
+agents must be command-enabled, lease-required and in HOLD, with available
+MULLET start/hold services and a single mission-lease publisher. Let $s$ be
+monotonic wall time, $s_0$ the first start-request time, and $T>0$ the requested
+duration. The common deadline is
+
+$$
+s_{end}=s_0+T.
+$$
+
+At $s\ge s_{end}$ the runner disables its lease and requests HOLD from every
+vehicle. A start rejection/timeout, cancellation or unhealthy running pipeline
+also requests HOLD for the whole team. The running-health check has a two-second
+startup grace. Default start/hold service timeouts are 5 s. The deadline covers
+startup-service latency; it is not measured from the final start acknowledgement.
+HOLD request/response times and fresh reported HOLD states are recorded; they
+do not establish instantaneous physical stopping.
+
+While starting/running, `docker/ros_timed_mission.py` renews a ROS-clock lease
+every 0.1 s with expiry $L=t+0.5$ s. `docker/mission_lease.py` accepts matching
+scenario/vehicle leases only when $t_{creation}\le t<L$ and their stated lifetime
+does not exceed 0.75 s. When `control.require_mission_lease` is true (the default
+SITL scenario), `docker/deployment_command_gate.py` adds the condition $t<L$ to
+command acceptance. The runner revokes the lease before HOLD requests, and a
+lost runner stops renewing it; command loss then invokes MULLET's own timeout
+behavior. Takeoff and landing remain external. The runner records before,
+during and after its command phase using the existing readiness recorder.
+
+
+### Onboard deployment planning and role communication (2026-11-04)
+
+The deployed estimator remains central. Each agent owns one
+`docker/deployment_onboard_planner.py::OnboardPlanner`, invoked by
+`docker/ros_agent.py::_plan` at the existing 0.5 s planner period; the 20 Hz
+command gate consumes only that agent's local proposal. GP timing and
+observation/target messages are unchanged. The simulation legacy path is unchanged.
+
+For role $r_i$, the implemented communication team is
+$$
+T_i=\{j:r_j=r_i\}.
+$$
+There is no distance threshold. Pose messages use role-specific
+`/mfgp/team_pose/ground` and `/mfgp/team_pose/aerial` topics. Own poses are also
+inserted directly at the sampling callback. The existing `/mfgp/pose` stream
+remains available to central services and diagnostics. Full trajectories are
+not exchanged by the planner. These are callback-time snapshots, not an ideal
+synchronized continuous team state.
+
+For ground agent $i$, the existing discrete Voronoi assignment is evaluated
+against all $j\in T_i$, in manifest order (including $i$). Its local result is
+exactly the $i$th component of the existing `GroundPlannerRuntime.plan`
+calculation on the same target and poses. All required ground poses and target
+must satisfy $0\le t-t_j\le2$ s with matching scenario identity, and ground
+poses must share a registration session. Missing, stale, or invalid inputs
+clear the agent's proposal; the command gate independently validates the local
+registration and proposal expiry. Each agent may observe different snapshots
+because delivery and timers are asynchronous.
+
+The current aerial adapter supports exactly one aerial vehicle and maintains
+only that vehicle's coverage/heat history; multi-aerial deployment is explicitly
+rejected by `OnboardPlanner.__init__`. No coordinated multi-aerial coverage
+claim is made. The existing HEDAC and ground velocity equations above are
+unchanged. `tests/test_deployment_onboard_planner.py` maps these equations to
+role filtering, equivalent ground proposals, freshness/session rejection and
+single-aerial operation. Compose runs no central planner services.
+
+
+### Recorded SITL truth visualization (2026-11-04)
+
+`docker/plot_readiness.py::render_summary` reconstructs the original static
+scenario with `build_scenario` and requires its canonical manifest hash to equal
+the recorded `scenario_hash`. It plots `BuiltScenario.high_field`, the same
+immutable HIGH raster passed to the simulated field service, without querying
+or modifying the estimator. For raster entry $F_{a,b}$, north coordinate is
+$o_N+b r$ and east coordinate is $o_E+a r$; the truth panel transposes $F$ to
+place east horizontally and north vertically. It replaces the proposed-speed
+panel, with no change to observations, metrics, GP equations or control.
+
+
+### Recorded mission video clock and sample selection (2026-11-04)
+
+`docker/replay_sitl.py::MissionReplay` indexes recorded pose and aerial-target
+packets by their JSONL `received_at` times, not inferred simulation steps. Let
+$t_0$ be the earliest received timestamp across all recorded events and $D$ the
+last timestamp minus $t_0$. With video frame rate $F>0$ and playback speed
+$s>0$, `frame_times` uses offsets
+$$
+\tau_k = k s/F,\qquad 0\le k\le\lfloor DF/s\rfloor,
+$$
+and appends $D$ if the last regular offset is smaller. The encoded clip has
+$N/F$ seconds for $N$ exported frames, including the final frame. At offset
+$\tau$, `snapshot` selects the last recorded posterior packet with
+$t_j-t_0\le\tau$ (stable log order breaks equal-time ties) and all pose
+packets satisfying the same inequality. No future packets are displayed, and
+poses are not interpolated. A posterior is held until replaced; prior to the
+first posterior the estimate is blank. The rendered paths join received pose
+samples and hold the last marker during gaps; they do not imply a validated
+continuous motion model. Recorder time includes preparation and stop intervals.
+
+`render` plots saved `high_mean` and `high_variance` against their saved query
+coordinates; truth is the hash-verified original HIGH raster described above.
+Fixed mean/truth color limits span both truth and all recorded posterior means;
+variance limits span zero to the maximum recorded variance. Those visual limits
+use the whole recording, while displayed states use only past packets. The GP,
+controller, sensor, metrics and numerical simulation are never rerun or changed.
+Tests in `tests/test_replay_sitl.py` cover packet selection, backwards seeking,
+scenario identity, playback timing, and real MP4/PNG export with immutable input.
+
+
+### Historical SITL retained-observation budgets (2026-11-04)
+
+The temporary 1,000-LOW / 1,000-HIGH newest-first configuration is archived in
+`docker/scenarios/sitl_three_drone_1000_samples_equal_speed.yaml` and
+`docker/scenarios/sitl_three_drone_1000_samples_role_speeds.yaml` (after the
+speed change). The current shared budget and filter supersede those settings
+and are defined below. Older scenarios with separate retention caps still use
+`SpatialAgeRetentionPolicy` by default. The original 250-per-fidelity manifest
+is `docker/scenarios/sitl_three_drone_250_samples.yaml`. The historical visual
+`examples/plot_sitl_retention_milestone.py` explicitly uses those archives.
+
+
+### Role-specific deployed speed limits (2026-11-04)
+
+`docker/deployment_settings.py::DeploymentSettings.max_speed_for_role` resolves
+$$
+v_{max,r}=\begin{cases}
+\texttt{control.max\_speed\_by\_role\_mps}[r], & \text{if provided},\\
+\texttt{control.max\_speed\_mps}, & \text{otherwise}.
+\end{cases}
+$$
+Overrides must be finite positive numbers for roles `aerial` and `ground`;
+unknown roles, booleans and malformed mappings are rejected. The active
+`docker/scenarios/sitl_three_drone.yaml` uses $v_{max,A}=1.0$ m/s and
+$v_{max,G}=0.5$ m/s, with the historical shared fallback of 0.5 m/s.
+
+`docker/ros_agent.py` resolves its role limit once at startup and supplies it
+both to `OnboardPlanner` and `accepted_velocity`. Aerial HEDAC proposals use
+$v_A=v_{max,A}g/\|g\|$ with zero velocity for zero gradient; ground proposals
+retain their existing clipped centroid-tracking law with $v_{max,G}$. The
+readiness evaluator checks each vehicle using the same role lookup; the
+optional old standalone ROS planner wrappers also use the matching role limit.
+The geofence continues to project the actual proposed velocity over the
+existing stopping horizon, so faster proposals are checked at their full speed.
+No integration rate, pose freshness, geofence margin, lease, kernel or sensing
+parameter is changed. Speed limits do not guarantee measured physical velocity.
+
+Tests in `tests/test_deployment_role_speeds.py` cover fallback, validation,
+onboard proposals and role-dependent readiness acceptance. The isolated
+`docker/role_speed_probe.py` exercises real agent command serialization and
+role gates without networking. `examples/plot_role_speed_milestone.py` compares
+real proposals at identical poses and posterior, before/after the overrides.
+The original equal-speed 1,000-sample manifest is preserved as
+`docker/scenarios/sitl_three_drone_1000_samples_equal_speed.yaml` for old logs.
+
+
+### Paper-based filtering with a shared HIGH objective and sample budget
+
+The source is Mantovani, Pratissoli and Sabattini, *Distributed Coverage Control
+for Spatial Processes Estimation With Noisy Observations*, IEEE RA-L 9(5),
+4431–4438 (2024), DOI 10.1109/LRA.2024.3381809, Section VI, Algorithm 1,
+Eqs. (18)–(19). The repository PDF is
+[the paper](biblio/Distributed_Coverage_Control_for_Spatial_Processes_Estimation_With_Noisy_Observations.pdf).
+The paper treats distributed single-fidelity GPs. Its rule is
+$$
+\epsilon=e(\mu_{max}-\mu_{min}),\qquad
+\sigma_{\mathrm{ep}}(x)\ge\epsilon/z,
+$$
+with $e=0.05$, $z=1.96$. This uses **latent standard deviation**, excluding
+additive measurement-noise variance. The optional `native_epistemic` criterion
+implements this rule with each observation's native LOW or HIGH latent GP.
+
+**Implemented active multi-fidelity extension.** The central estimator and
+single posterior remain shared. `criterion: high_information` uses one HIGH
+field objective and one threshold for both input fidelities:
+$$
+\tau_H=\frac{e}{z}\left(\max_{q\in G}\mu_H(q)-\min_{q\in G}\mu_H(q)\right).
+$$
+Here $G$ is the configured query grid (masked if a mask is supplied). The range
+uses the last committed **raw HIGH mean**, without density normalization,
+clipping or access to ground truth. The threshold stays fixed within one
+scheduled update. An initially flat mean gives zero threshold; bootstrap
+accepts samples with positive information, subject to the budget.
+
+For a candidate observation $y_f(x)=f_f(x)+\nu_f$, $f\in\{L,H\}$, denote
+current latent conditional covariance by $C_{ab}$. With known observation noise
+variance $r_f$ and the model's effective jitter $\eta$, its expected reduction
+of HIGH variance **at that candidate's location** is
+$$
+\Delta V_H(x;y_f)=
+\frac{C_{Hf}(x,x)^2}{C_{ff}(x,x)+r_f+\eta},\qquad
+s_f(x)=\sqrt{\Delta V_H(x;y_f)}.
+$$
+The candidate passes the information test iff $s_f(x)>0$ and $s_f(x)\ge\tau_H$.
+This is a local expected-variance-reduction criterion, not integrated global
+information gain. It is an explicit extension, not a claim that the paper uses
+this equation. Both fidelities share the same HIGH-unit threshold. Measurement
+noise is never added to epistemic variance; it correctly attenuates the
+expected reduction through the observation denominator. If LOW has no HIGH
+cross-covariance (e.g. $\rho=0$), LOW cannot pass merely because discrepancy
+variance is high.
+
+**Exact mixed posterior and sequential batch equations.**
+`MultiFidelityGaussianProcess.predict_joint_latent` evaluates arbitrary LOW/HIGH
+latent variables. For flags $h_i\in\{0,1\}$ and $a_i=1$ for LOW or
+$a_i=\rho$ for HIGH,
+$$
+K_{ij}=a_i a_j k_L(x_i,x_j)+h_i h_j k_\delta(x_i,x_j),\qquad
+C=K-K_{DY}^{\mathsf T}A^{-1}K_{DY}.
+$$
+$A$ is the existing retained training covariance including individual noise
+variances and jitter. All products with $A^{-1}$ are implemented using the
+existing Cholesky factor and triangular solves, never explicit inversion.
+`predict_low` exposes native LOW marginals while `predict_high` retains its
+existing API and equations.
+
+For pending observations $Y=(y_{f_j}(x_j))$, the filter computes the latent
+candidate covariance $C_{YY}$ and $B_{ij}=C_{Hf_j}(x_i,x_j)$ from the committed
+model. Candidates are processed by timestamp and stable pending index (LOW
+before HIGH for equal timestamps across the two buffer lists). After accepting
+candidate $j$, let $d=C_{YY,jj}+r_j+\eta$. Rank-one conditioning uses
+$$
+C_{YY}\leftarrow C_{YY}-\frac{C_{YY,:,j}C_{YY,:,j}^{\mathsf T}}{d},\qquad
+B\leftarrow B-\frac{B_{:,j}C_{YY,:,j}^{\mathsf T}}{d},
+$$
+with both right-hand-side columns copied **before** either update. Later
+candidates therefore account for earlier accepted measurements without fitting
+or optimizing a separate GP per observation. Observed values affect the fitted
+posterior after admission, not this within-batch covariance update. Exact
+observation-record duplicates are skipped; new noisy observations at the same
+position can remain informative.
+
+**Shared budget and transaction semantics.** Active configuration is
+`max_total_samples: 1000`, increased from the first shared $B=500$
+configuration, and below the temporary $1000+1000$ per-fidelity limits:
+$$
+|D_L|+|D_H|\le B=1000.
+$$
+There is no active per-fidelity quota: either fidelity may occupy all $B$
+slots. The internal per-fidelity buffers each allow $B$ entries solely to
+accommodate any split; the common admission step enforces the combined cap.
+The historical/default `on_full: reject` mode never evicts admitted data; if no
+slot remains, new candidates are counted as capacity-rejected. The active
+`on_full: information` mode additionally permits improving replacements as
+specified below. This hard cap is an additional
+engineering constraint, absent from the paper, and can halt learning of new
+regions after saturation. It is not a guarantee of maintaining useful coverage
+everywhere with a finite number of observations. Optional separate caps remain available
+for historical/native-filter configurations; mixing both budget formats is
+rejected. Default/legacy estimator settings keep newest-first retention.
+
+`BoundedObservationBuffer.candidate(pending_admission=...)` builds candidates
+without mutating retained or pending observations. A successful fit commits
+both buffers and filter counters together. Filter/fit failure preserves the
+previous valid GP, snapshot, counters and pending observations for retry.
+If all candidates are rejected, pending records are consumed without refitting
+or incrementing the posterior version. No optimization occurs at command rate.
+
+**Publication and code map.** At scheduled central ticks, a filtered static
+model with no informative new data still publishes its current valid arrays.
+In the pure runtime `timestamp` initially records tick start; the ROS
+publication loop restamps it at actual emission (before compute for a cached
+heartbeat and after compute for a completed result). `posterior_timestamp` is
+the immutable last-fit snapshot timestamp; `model_updated` distinguishes fits
+from refreshes. A refresh changes no posterior arrays/version and does not mean a
+new observation or new GP fit occurred. Failed updates do not refresh the
+target. This prevents intentional redundancy rejection from being mistaken for
+a missing central publisher, while preserving pose/lease/command freshness.
+The static-field assumption is essential; no temporal field dynamics are added.
+
+- `src/core/epistemic_sample_filter.py`: paper threshold, HIGH score, duplicates,
+  sequential covariance conditioning and bounded admission.
+- `src/core/multifidelity_gp.py`: LOW marginals and mixed latent covariance.
+- `src/core/observations.py`: transactional admission and protected retained data.
+- `src/core/multifidelity_estimator.py`: scheduled filter/fit, shared budget,
+  committed acceptance/rejection counters and rollback.
+- `src/core/deployment_estimator.py`: configuration wiring with legacy fallback.
+- `docker/deployment_runtime.py`, `docker/ros_central.py`: unchanged central
+  topics with publication/fit timestamps and filter diagnostics.
+- `tests/test_epistemic_sample_filter.py`, `test_multifidelity_joint_prediction.py`,
+  `test_epistemic_retention_integration.py`, `test_deployment_epistemic_filter.py`:
+  equation, covariance, budget, rollback, refresh and HIGH-to-aerial contracts.
+- `examples/plot_epistemic_retention_milestone.py`: paired offline recomputation
+  on identical real recorded observations; original pre-recording GP state is
+  not available, so this is not an exact replay of that flight's posterior.
+
+
+### Shared-budget increase to 1,000 (2026-11-04)
+
+The active deployed sample budget is now $B=1000$ total LOW+HIGH, configured
+by `estimator.retention.max_total_samples`. There are still no per-fidelity
+quotas. The HIGH-information score, $e=0.05$, $z=1.96$, covariance conditioning,
+protected retained samples and static-posterior refresh semantics are unchanged.
+The previous filtered $B=500$ manifest is preserved at
+`docker/scenarios/sitl_three_drone_500_samples_high_information.yaml` for old
+recording hashes. `tests/test_deployment_estimator.py` demonstrates a single
+scheduled update retaining 600 observations, exceeding the former combined
+limit, through the actual adapter. A larger finite budget can still saturate
+and increases dense-GP computation; no freshness limits are relaxed.
+
+
+### Information-based replacement at the shared capacity (2026-11-04)
+
+The active scenario keeps $B=1000$ and adds `on_full: information` with
+`replacement_min_improvement: 1e-8`. Historical manifests without that setting
+continue using `on_full: reject`. Replacement requires enabled HIGH-information
+filtering and a shared budget. It does not change the MFGP model or the paper's
+admission threshold; this bounded replacement step is a further extension of
+the paper, not an algorithm attributed to it.
+
+**Implemented objective and scope.** For the configured query points $G$,
+integration weights $w_q$ and optional mask $m_q$, define
+$$
+\bar w_q=\frac{w_q m_q}{\sum_{u\in G}w_u m_u},\qquad
+J(D)=\sum_{q\in G}\bar w_q\operatorname{Var}[f_H(q)\mid D].
+$$
+With no mask, $m_q=1$. Weights are fixed integration weights, not estimated
+coverage density or hidden truth. This is a finite-grid average, not a
+continuous-domain guarantee. Lower $J$ does not imply lower true estimation
+error or lower variance at every query point.
+
+When an update starts with a full retained set, the existing filter first
+identifies informative pending candidates that would otherwise be rejected
+for capacity. The estimator scores **all** pairs of one such new sample and
+one retained sample, chooses the best improving pair, and permits **at most
+one swap per scheduled update**. Ordinary admission handles updates that start
+below capacity; no replacement is attempted in the same update that first
+fills it. This bounds the work and guarantees at most one final joint-GP fit.
+No age-based or fidelity-based replacement priority is imposed. A nearby HIGH
+sample can replace LOW data if the weighted HIGH objective improves; the best
+removal may also be spatially distant if those data are more redundant.
+
+**Exact addition/removal scores at fixed model parameters.** Let $A$ be the
+current retained noisy covariance (including jitter), $L$ its Cholesky factor,
+$k(q)=\operatorname{Cov}(D,f_H(q))$ and $c=\operatorname{Cov}(D,y_{new})$.
+Set
+$$
+a=A^{-1}c,\quad U_j(q)=[A^{-1}k(q)]_j,\quad
+p_j=e_j^{\mathsf T}A^{-1}e_j,\quad
+b(q)=\operatorname{Cov}(f_H(q),y_{new}\mid D),
+$$
+$$
+d=\operatorname{Var}(f_{new}(x)\mid D)+r_{new}+\eta,
+\qquad g=\frac{\sum_q\bar w_q b(q)^2}{d}.
+$$
+Here $r_{new}$ is the candidate's known noise variance and $\eta$ is the
+current effective jitter. Adding the candidate reduces $J$ by $g$. The
+subsequent increase from removing old sample $j$ from that augmented model is
+$$
+\ell_j^+=\frac{\sum_q\bar w_q
+\left[U_j(q)-\frac{a_j}{d}b(q)\right]^2}
+{p_j+a_j^2/d},\qquad
+\Delta J_j=g-\ell_j^+.
+$$
+These scores equal $J(D)-J((D\setminus\{j\})\cup\{new\})$ at fixed
+kernels and noise. `MultiFidelityGaussianProcess.score_replacements` evaluates
+them by triangular solves against $L$ and $L^{\mathsf T}$. No explicit
+inverse matrix is formed. The diagonal $p_j$ is obtained from squared norms
+of blocked solves $LZ=E$ for at most 64 basis columns at a time, rather than
+storing a full precision matrix. Matrix products reuse the current factor to
+score the entire retained/candidate pairing; no trial GP is fitted per pair.
+Rows follow retained LOW-then-HIGH order; pending candidates follow timestamp
+and stable admission order. Equal-score ties use the first matrix entry.
+
+**Selection and final verification.** The required improvement is
+$$
+\delta_{min}=\max\left(\texttt{replacement\_min\_improvement},
+10^{-12}\max(1,|J(D)|)\right).
+$$
+A proposed swap must satisfy $\Delta J>\delta_{min}$. After fitting the
+proposed dataset, the actual published-grid variance must also satisfy
+$J(D_{swap})<J(D)-\delta_{min}$. If this final check fails, old observations
+and posterior are kept and pending candidates are consumed as rejected. A
+filter/scoring/fit/normalization exception instead preserves pending data too,
+allowing retry. The active deployment uses fixed kernels; the final check also
+protects the objective if optional optimization or adaptive jitter changes the
+model from that assumed by the analytic scores.
+
+`BoundedObservationBuffer.candidate` now accepts `retained_admission` alongside
+`pending_admission`. Both masks are staged, with no mutation until the entire
+new posterior validates. Admission/removal and counters commit together, keeping
+$|D_L|+|D_H|\le1000$. With one replacement the size remains constant. Rejected
+swaps do not increment the posterior version. Existing static refresh semantics
+apply when there is no new committed fit.
+
+**Diagnostics and readiness.** `sample_filter` exposes cumulative `replaced`,
+`evicted_low`, `evicted_high`, and `replacement_evaluations` (number of pair
+scores), plus the last verified $J$ before/after and its improvement. Existing
+accepted counters count historical admissions, not currently retained samples.
+The readiness checker in shared replacement mode requires both fidelities to
+have contributed (current retained data or committed historical admissions),
+a nonempty retained model and current valid posterior. It does not impose a
+permanent fidelity quota that could falsely fail when the last LOW or HIGH
+sample is replaced. All timestamp, command, frame, pose and lease checks remain.
+
+Equation-to-code additions:
+- `src/core/multifidelity_gp.py::score_replacements`: exact $g$, $\ell_j^+$,
+  $\Delta J$ via the existing factor.
+- `src/core/multifidelity_estimator.py::_try_replacement` and `update`: best
+  one-swap selection, masks, actual objective check and transactional commit.
+- `src/core/epistemic_sample_filter.py`: explicit capacity-candidate indices,
+  full-budget configuration and committed diagnostics fields.
+- `src/core/observations.py::BoundedObservationBuffer.candidate`: staged
+  retained and pending masks with capacity validation.
+- `docker/deployment_readiness.py`: historical contribution checks only for
+  shared information-replacement mode.
+- `tests/test_multifidelity_replacement_scores.py`: independent brute-force
+  refit comparison for every tested pair, including unequal weights/noise.
+- `tests/test_information_replacement.py`: improving/rejected swaps, best new
+  candidate, rollback, final verification and one-fit bound.
+- `tests/test_deployment_epistemic_filter.py`: replacement HIGH observation →
+  changed posterior/target → changed onboard aerial velocity at capacity.
+- `examples/plot_information_replacement_milestone.py`: deterministic full
+  1,000-sample update from actual scenario fields and before/after visual.
+
+
+### Sequential central compute/publication timing correction (2026-11-04)
+
+The failed `mission_filtered` run stopped at 129.949 s: after the budget filled,
+a replacement took about 1.45 s and completion-only publications were 2.49 s
+apart. The 2 s target age gate cleared all plans, and the 0.25 s observed-command
+gate caused HOLD. This was not a GP numerical failure. The old Docker image
+used generic system BLAS (NumPy 1.26.4 / SciPy 1.11.4); the image now explicitly
+installs NumPy 1.26.4 / SciPy 1.13.1 binary wheels with OpenBLAS and one thread.
+This changes the numerical implementation/performance, not the GP equations.
+
+**Deployed schedule.** `docker/deployment_publication.py::CentralUpdateLoop`
+is a normal sequential object owned by the central ROS node. Let $s_k$ be ROS
+clock time at attempt start, $c_k$ its completion time, and $T$ the configured
+update period (1 s). The ROS integration calls
+`DeploymentEstimator.complete_update(c_k)` so the next attempt satisfies
+$$
+s_{k+1}\ge c_k+T.
+$$
+The existing 0.1 s polling timer can add dispatch delay. There is no catch-up
+burst when compute exceeds the nominal period. The pure adapter's explicit-time
+`update` API remains available for deterministic offline experiments; the
+completion rule is applied by the deployed publication loop.
+
+If a valid cached posterior exists and the preceding attempt has not failed,
+the loop publishes it at $s_k$ with `model_updated=false` and
+`update_in_progress=true`. It also publishes current central status before
+compute. After a successful attempt it publishes the new or unchanged valid
+posterior at $c_k$, with `update_in_progress=false`. Both target packets use
+actual emission timestamps rather than subtracting compute time from their
+freshness. `posterior_timestamp` and version change only after an actual fit;
+`update_started_at`, `update_completed_at` and monotonic `update_duration_s`
+report computation separately. The completed packet's timestamp is not a claim
+that its observations were acquired at completion time.
+
+For attempt duration $D_k=c_k-s_k$ and idle interval approximately $T$, the
+ideal maximum gap from this before/after pattern is approximately
+$\max(T,D_k)$ rather than $T+D_k$ for completion-only publication. ROS scheduling
+and serialization can add delay; this is not an unbounded deadline guarantee.
+No target (2 s), central-status (2 s), pose, lease or command limit is increased.
+A known failed attempt suppresses later cached refreshes until recovery. A
+pre-update heartbeat may have been emitted before that failure became known.
+Repeated failure therefore ages the last target and still triggers HOLD.
+GP and buffers retain their previous valid state as before. No concurrency,
+worker process or middleware is added.
+
+**Replacement geometry cache.** `MultiFidelityGaussianProcess` keeps at most
+one retained-data/grid geometry: projected query covariance, influence vectors,
+weighted norms, precision diagonal and $J(D)$. It reuses these only for an
+identical fitted factor/kernel signature, exact query coordinates and normalized
+weights. Successful fitting invalidates the cache. Candidate-dependent solves
+and all swap/verification equations remain unchanged. The cache is bounded by
+$O(N|G|)$ storage and never stores an explicit covariance inverse. Tests compare
+cached results, changed weights and refitting with fresh calculations.
+
+**Failed-health snapshot.** `health_failure_snapshot` in
+`docker/timed_mission.py` copies the runtime health reasons and timestamp plus
+target/central/pose/plan/command ages. `ros_timed_mission.execute` saves it to
+`mission.health_failure` and a `mission_health_failure` event before HOLD.
+`ReadinessNode.report` adds last observed command receipt time to its statistics;
+this does not alter its 0.25 s rejection threshold. This snapshot preserves the
+trigger even if the final post-HOLD report becomes ready again.
+
+**Validation clock and metric.** `docker/deployment_timing_validation.py`
+uses the actual central runtime, planners and command gate with a controlled
+clock, fixed measured poses, fresh leases and 1.45 s injected compute durations
+for 240 s. It checks commands at 20 Hz for three vehicles, including both end
+points: $3(240\cdot20+1)=14403$ checks. Rejections count gate calls returning
+no command; no motion integration, tracking or live mission is simulated.
+The comparison completion-only publisher is given ideal fresh completion
+stamps, so it isolates missing pre-update publication rather than penalizing
+old start stamps. Its maximum target age is 2.45 s, versus 1.45 s after the fix,
+with 2,583 versus zero rejected command checks. These are controlled timing
+results, not a completed moving SITL experiment.
+
+Code/equation map additions: `docker/deployment_publication.py` for the
+$s_k,c_k$ publication loop, `src/core/deployment_estimator.py::{update_due,
+complete_update}` for deployment scheduling, `src/core/multifidelity_gp.py::_replacement_geometry`
+for exact cached swap geometry, `docker/ros_central.py` for the ROS wiring and
+update timing status, `docker/timed_mission.py::health_failure_snapshot` and
+`docker/ros_timed_mission.py` for failure recording. Tests are in
+`tests/test_central_publication_timing.py`,
+`tests/test_multifidelity_replacement_scores.py` and `tests/test_timed_mission.py`;
+`docker/central_timing_probe.py` measures the real image and isolated ROS delay,
+and `examples/plot_central_timing_milestone.py` renders the deterministic trace.
+
+
+## Implemented SITL planar circular-obstacle CBF
+
+The optional ground-role command filter treats map-plane velocity as the input:
+$\dot p=v$. It is separate from the unicycle simulation prototype and does not
+change the GP or planner objective. For circular center $c_j$, physical radius
+$r_j$ and configured combined clearance $m$, define
+
+$$
+h_j(p)=\|p-c_j\|^2-(r_j+m)^2.
+$$
+
+The continuous ideal constraint is
+$2(p-c_j)^T v+\alpha h_j(p)\geq0$. The exact command implementation solves
+
+$$
+v^*=\arg\min_v \|v-v_{nom}\|^2,\qquad
+2(p-c_j)^Tv\geq-\alpha h_j(p),\quad \|v\|\leq v_{max},
+\quad (l_k-p_k)/T\leq v_k\leq(u_k-p_k)/T.
+$$
+
+Here $[l_k,u_k]$ is the existing geofence after its margin, and $T$ is the
+configured stopping horizon. The 2D solver enumerates interior/radial projection,
+line projections, pairwise line intersections and line/speed-circle intersections,
+then selects the feasible candidate of minimum squared error. It uses linear
+solves, not matrix inversion. It runs at command rate using current validated
+pose, rather than triggering GP updates. Missing configuration disables it;
+aerial-role commands bypass it. An interior/invalid/infeasible filter result
+produces zero planar velocity, an explicit status and throttled warning, subject
+to the remaining command gates. Holding inside an inflated disk does not restore
+safety and requires operator recovery.
+
+For exact held velocity with step $\Delta t$, the implemented model satisfies
+
+$$
+h_j(p+\tau v)=h_j(p)+2\tau(p-c_j)^Tv+\tau^2\|v\|^2
+\geq(1-\alpha\tau)h_j(p),\quad 0\leq\tau\leq\Delta t.
+$$
+
+Thus an initially safe disk constraint remains safe for ideal tracking if
+$\alpha\Delta t\leq1$. The deterministic rollout uses $\Delta t=0.05$ s
+and $\alpha=1$ per second. Physical tracking, telemetry latency, acceleration
+and stopping dynamics are not captured by this argument. The filter ensures no
+global convergence: obstacle-induced stalls remain possible.
+
+Equation-to-code map: `src/core/planar_cbf.py::filter_velocity` implements the
+projection; `docker/deployment_obstacle_filter.py::ObstacleFilter` inflates
+manifest circles and reports filter state; `docker/deployment_command_gate.py`
+applies it within existing acceptance gates; `docker/ros_agent.py::_command`
+invokes it per command tick. `examples/plot_sitl_obstacle_cbf_milestone.py` uses
+real Lloyd proposals with fixed truth-weighted centroids for ideal-tracking
+comparison, not a recorded flight or an estimator benchmark.

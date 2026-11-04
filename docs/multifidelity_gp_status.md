@@ -1,6 +1,840 @@
 # Multi-Fidelity GP Implementation Status
 
-## Current Milestone
+## Fix central latency/publication early mission stops (2026-11-04)
+
+- Investigated the failed `output/sitl/mission_filtered.json` and JSONL. The
+  requested 240 s mission stopped after **129.949 s**, `pipeline_unhealthy`.
+  The budget reached 1,000 near 125.8 s; subsequent replacements took about
+  1.35–1.45 s and target receipt gaps reached **2.49 s**. All agents logged
+  stale input at 129.72 s, cleared plans, and the runner requested HOLD after
+  0.25 s without observed commands. All three confirmed HOLD. Both replacement
+  improvements were valid and central error count was zero; the final
+  `ready: true` was recovered post-HOLD readiness, not mission success.
+- A read-only attempt to inspect the live numerical stack found the central
+  service already stopped. Isolated image inspection showed NumPy 1.26.4 /
+  SciPy 1.11.4 linked to generic system BLAS, with no detected OpenBLAS pool.
+  The image now explicitly installs NumPy 1.26.4 / SciPy 1.13.1 binary wheels
+  (`--ignore-installed --only-binary=:all:`) backed by OpenBLAS. Numerical
+  thread defaults are one for OpenBLAS/OMP/MKL/Numba. NumPy major ABI, robot
+  speeds, 1,000-sample budget, filtering/replacement equations and thresholds
+  are unchanged. No new application concurrency was introduced.
+- Added `CentralUpdateLoop`, a sequential Python object owned by the ROS central
+  node. It publishes valid cached target/status before compute and completion-
+  stamped target/status afterward, then schedules the next attempt one full
+  configured period after completion. There is no catch-up fit burst. Model
+  version and last-fit timestamp retain their original meaning; packet/status
+  metadata expose update start, completion, duration and progress. After a
+  known failure, cache refresh is suppressed until a successful result (a
+  pre-heartbeat can already have been emitted before failure was known).
+  All target/status/pose/lease/command age limits remain unchanged.
+- Added bounded caching of replacement geometry keyed by trained factor/kernel
+  signature and exact query/normalized weights. Successful fitting invalidates
+  it. Retained geometry solves are reused when an unchanged model rejects new
+  candidates; candidate-dependent solves and exact scores remain unchanged.
+- Mission runner now captures `mission.health_failure` and a
+  `mission_health_failure` event before HOLD, including exact reasons and
+  target/status/pose/proposal/agent-command/observed-command ages. Readiness
+  recording retains the latest target and last command receipt timestamp.
+  This preserves the failure trigger when the final HOLD report later recovers.
+- Test-first publication/diagnostic imports failed before their components
+  existed; existing GP/publication contracts then passed 53 tests. A Ruff
+  unused-variable finding during cache extraction was fixed. Virtual stress
+  test initially failed on missing helper, then passed after implementation.
+  Final command `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m pytest -q
+  tests/test_central_publication_timing.py tests/test_multifidelity_replacement_scores.py
+  tests/test_information_replacement.py tests/test_epistemic*.py
+  tests/test_multifidelity_joint_prediction.py tests/test_deployment*.py
+  tests/test_observations.py tests/test_multifidelity_estimator.py
+  tests/test_multifidelity_gp.py tests/test_multifidelity_gp_contract.py
+  tests/test_aerial_multifidelity_feedback.py tests/test_ground_multifidelity_feedback.py
+  tests/test_timed_mission.py tests/test_mission_lease.py
+  tests/test_plot_sitl_summary.py tests/test_replay_sitl.py --tb=short`
+  passed **222 tests in 9.24 s**. New checks cover completion stamps, cached
+  pre-publication, completion-based scheduling, failure suppression/recovery,
+  cache reuse/invalidation/changed weights and preserved health snapshots.
+- `MPLCONFIGDIR=/tmp/mpl-sitl PYTHONPATH=. .venv/bin/python
+  examples/plot_central_timing_milestone.py` generated and visual inspection
+  verified `docs/assets/sitl/central_timing.png` and `_metrics.json`. At a
+  controlled **1.45 s compute duration over 240 virtual seconds**, actual
+  planners/gates with fixed poses and fresh leases perform **14,403 checks**:
+  completion-only publication yields **2,583 rejections**, corrected publication
+  **zero**. Maximum target age is **2.45 vs 1.45 s** against the same 2 s limit.
+  This tests the timing layer, not integrated trajectories or a moving mission.
+- An isolated baseline run of `docker.central_timing_probe --benchmark-only
+  --allow-generic-backend` used the old image with current source mounted
+  read-only. The full-budget replacement took **1.386745 s**. After rebuilding,
+  the identical workload took **0.226579 s**, with both NumPy/SciPy OpenBLAS
+  pools confirmed at one thread. The verified objectives agree to approximately
+  1e-16 (0.10425415012715261 → 0.10382266247899). No selection-math regression
+  was observed. Exact benchmark/ROS metrics are saved in
+  `docs/assets/sitl/central_backend_metrics.json`; timings are measured samples,
+  not unconditional hardware or ROS deadline guarantees.
+- Docker build initially failed on sandbox buildx writes; authorized
+  `docker compose -f docker/compose.yaml build central` installed the pinned
+  wheels and built successfully. Its existing base-package metadata/root-pip
+  warnings were non-blocking. Authorized network-isolated runs used
+  `docker run --rm --network none -e ROS_DOMAIN_ID=101/102/103/104/105
+  mfgp-deployment:local` with `docker.central_timing_probe`,
+  `docker.timed_mission_probe`, `docker.information_replacement_probe`,
+  `docker.command_bridge_probe`, `docker.role_speed_probe` respectively.
+  The ROS slow-update check measured 1.450980 s compute, **0.005958 s** completed
+  packet age on receipt and **1.453202 s** pre/post publication gap. Mission
+  service tests pass normal deadline, partial start, cancellation, disabled
+  agents, and deliberately unhealthy pipeline with reasons captured and all
+  HOLD states confirmed. Replacement still changes aerial command by
+  **0.00558257 m/s**. Bridge passes seven rejection cases at **20.00033 Hz**,
+  maximum gap **0.05035 s**. Role speed limits remain enforced. No probe had
+  a network path to live vehicles.
+- Files added: `docker/deployment_publication.py`,
+  `docker/deployment_timing_validation.py`, `docker/central_timing_probe.py`,
+  `tests/test_central_publication_timing.py`,
+  `examples/plot_central_timing_milestone.py`, and the three timing assets above.
+  Files revised: `docker/Dockerfile`, `docker/ros_central.py`,
+  `src/core/deployment_estimator.py`, `src/core/multifidelity_gp.py`,
+  `docker/{timed_mission,ros_readiness,ros_timed_mission,timed_mission_probe}.py`,
+  replacement-score and timer tests, Docker README, mathematical reference,
+  deployment plan/interface specification and this record. Scoped Ruff
+  lint/format, Python compilation, Compose validation and `git diff --check`
+  passed.
+- Regressions/limits: no unintended numerical/behavioral regressions found in
+  tested paths. Intended changes are deployment attempt cadence, publication
+  timing, performance and failure diagnostics. A callback exceeding 2 s can
+  still expire targets, as intended; the fix is not an unlimited heartbeat or
+  extended safety timeout. The image is rebuilt, but no live deployment was
+  restarted or mission started. A moving 240 s SITL rerun remains necessary;
+  restart the full stack in HOLD and rerun readiness first.
+
+
+## Verified information-based replacement at capacity (2026-11-04)
+
+- Active shared budget remains **1,000 samples**, with `on_full: information`
+  and `replacement_min_improvement: 1e-8`. Informative capacity-blocked samples
+  can replace one retained sample when doing so lowers grid-integration-weighted
+  HIGH latent variance. Every retained/new pair is scored, and at most **one
+  best swap per scheduled update** is allowed. No age/fidelity preference is
+  imposed. Updates that first fill the budget use normal admission; swapping
+  starts on subsequent full-budget updates. Historical/default `on_full: reject`
+  remains functional. Archived the original shared-1,000 manifest as
+  `docker/scenarios/sitl_three_drone_1000_samples_high_information_no_replacement.yaml`
+  for replay hashes.
+- Added pure GP addition/removal identities reusing the current Cholesky factor.
+  Weighted removal losses and candidate gains score all swaps without fitting
+  a separate GP per possibility or forming an inverse matrix. Precision
+  diagonals use triangular solves against blocks of 64 basis vectors. A proposed
+  swap is fitted once, and its actual posterior must independently pass the
+  configured objective-improvement check before buffers/counters commit. Failed
+  scoring/fit/normalization preserves the previous model and pending data; a
+  non-improving verified candidate is consumed as rejected with old model intact.
+  Pointwise variance may increase even while the weighted average improves.
+- Added staged retained masks alongside pending masks. Diagnostics expose
+  cumulative replacements, evicted LOW/HIGH counts, number of pair evaluations,
+  and the last verified objective before/after/improvement. In replacement mode,
+  readiness requires both fidelities to have contributed and a nonempty current
+  posterior, without enforcing permanent retained-fidelity quotas. Existing
+  pose/command/frame/lease freshness remains unchanged. This avoids falsely
+  declaring a valid model unhealthy after its last LOW or HIGH datum is removed.
+- Files added: `tests/test_multifidelity_replacement_scores.py`,
+  `tests/test_information_replacement.py`,
+  `docker/information_replacement_probe.py`,
+  `examples/plot_information_replacement_milestone.py`, archived scenario above,
+  and `docs/assets/sitl/information_replacement{.png,_metrics.json}`. Files
+  revised: `src/core/{multifidelity_gp,multifidelity_estimator,observations,
+  epistemic_sample_filter,deployment_estimator}.py`,
+  `docker/deployment_readiness.py`, active scenario YAML,
+  `tests/test_deployment_epistemic_filter.py`,
+  `tests/test_deployment_sitl_readiness.py`, historical retention visual generator,
+  Docker README, mathematical reference, deployment interface/plan and this file.
+  The math reference distinguishes the paper filter from the replacement
+  extension and documents the exact discrete objective and equation-to-code map.
+- Test-first GP swap-score tests failed before the method existed; after its
+  implementation, 43 GP contracts passed. Integration tests initially failed
+  on absent settings, then passed 67 relevant contracts after wiring. Activation
+  and retained-quota tests were written first and initially failed as expected.
+  An unused test import flagged by Ruff was removed. Final command
+  `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m pytest -q
+  tests/test_information_replacement.py tests/test_multifidelity_replacement_scores.py
+  tests/test_epistemic*.py tests/test_multifidelity_joint_prediction.py
+  tests/test_deployment*.py tests/test_observations.py tests/test_multifidelity_estimator.py
+  tests/test_multifidelity_gp.py tests/test_multifidelity_gp_contract.py
+  tests/test_aerial_multifidelity_feedback.py tests/test_ground_multifidelity_feedback.py
+  tests/test_timed_mission.py tests/test_mission_lease.py
+  tests/test_plot_sitl_summary.py tests/test_replay_sitl.py --tb=short`
+  passed **214 tests in 4.07 s**. Contracts compare every tested analytic score
+  against independent brute-force GP refits, cover improving/worsening swaps,
+  best incoming candidate, important-oldest preservation, failure rollback,
+  final actual-objective rejection, one joint fit per update, and active
+  full-budget HIGH → posterior/target → onboard aerial command change.
+- `OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MPLCONFIGDIR=/tmp/mpl-sitl
+  PYTHONPATH=. .venv/bin/python examples/plot_information_replacement_milestone.py`
+  generates a real full-budget sequential GP update using deterministic
+  observations derived from the actual scenario fields. A new HIGH sample
+  replaces one LOW sample, keeping **1,000 retained**. The objective falls
+  **0.104174543 → 0.103745047** (improvement **0.0004294955**). Maximum HIGH mean
+  change is **0.3314504**, aerial target change **0.0001119605**, and fixed-pose
+  onboard aerial velocity change **0.0164570 m/s**. The selected LOW removal is
+  at `(12, -8)` m while the new HIGH is at `(15, 15)` m: the global objective
+  need not pick a geometrically nearby removal. Complete update timings were
+  **0.119–0.217 s locally** with single-thread BLAS (final JSON 0.217 s), not a
+  hardware/live ROS deadline guarantee. Final spatial/bar PNG was inspected
+  with numeric objective labels. This is a deterministic implementation
+  demonstration, not a new flight or a reproduction of a saved mission.
+- Historical recorded-data visual regression command:
+  `OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MPLCONFIGDIR=/tmp/mpl-sitl
+  PYTHONPATH=. .venv/bin/python examples/plot_epistemic_retention_milestone.py
+  --output-stem /tmp/replacement_recording_regression`. It passes with the
+  newest-first branch explicitly using `on_full: reject`; existing non-saturated
+  recorded results remain 218 LOW / 358 HIGH, with no replacements needed.
+- Scoped Ruff lint/format, Python compilation, Compose configuration validation
+  and `git diff --check` passed. Docker build initially failed on sandboxed
+  buildx writes; authorized `docker compose -f docker/compose.yaml build central`
+  succeeded. The first isolated run failed on sandbox socket access; authorized
+  `docker run --rm --network none -e ROS_DOMAIN_ID=101/102 mfgp-deployment:local
+  docker.information_replacement_probe` / `docker.role_speed_probe` passed.
+  The real ROS replacement probe uses a three-sample budget to verify saturation:
+  one LOW removed, HIGH admitted, weighted objective improvement **0.000310622**,
+  aerial command change **0.00558257 m/s**, and fresh posterior publication
+  without extra fitting. The speed probe again passes 40 aerial commands at
+  0.8 m/s and rejection above each role's limit. No network path to live vehicles
+  existed. The updated image is built; no live restart or mission was performed.
+- Regressions/limits: no unintended numerical or behavioral regressions found.
+  Intended effects are globally improving swaps and possible local variance
+  increases. The existing local information threshold still gates candidates;
+  this is a one-step, one-swap greedy method, not globally optimal dataset
+  compression. Replacement CPU cost and physical tracking need live validation.
+  Restart all deployment services in HOLD and repeat readiness before a new trial.
+
+
+## Shared training budget increased from 500 to 1,000 (2026-11-04)
+
+- Active `docker/scenarios/sitl_three_drone.yaml` now sets
+  `estimator.retention.max_total_samples: 1000`. This remains a single LOW+HIGH
+  budget, with the same HIGH-information filter, confidence parameters,
+  protected retained data, speed limits and scheduling. Archived the preceding
+  manifest verbatim as `docker/scenarios/sitl_three_drone_500_samples_high_information.yaml`
+  so existing filtered mission hashes remain reproducible.
+- Updated the active configuration test before changing the YAML; it failed
+  with actual cap 500. The deployed-adapter integration test now verifies that
+  600 observations survive a single scheduled update (above the old total
+  limit), and resolves total budget 1,000. The ROS diagnostic probe reads its
+  budget from the manifest instead of assuming 500. The visual generator uses
+  the configured budget in its title and accepts a separate output stem.
+- Final test command: `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m pytest -q
+  tests/test_deployment*.py tests/test_epistemic*.py
+  tests/test_multifidelity_joint_prediction.py tests/test_multifidelity_estimator.py
+  tests/test_aerial_multifidelity_feedback.py tests/test_ground_multifidelity_feedback.py
+  --tb=short` — **121 passed in 5.15 s**. Scoped Ruff lint/format,
+  Compose configuration validation and `git diff --check` passed.
+- `OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MPLCONFIGDIR=/tmp/mpl-sitl
+  PYTHONPATH=. .venv/bin/python examples/plot_epistemic_retention_milestone.py
+  --output-stem shared_budget_1000` generated
+  `docs/assets/sitl/shared_budget_1000.png` and its `_metrics.json` from the
+  same 1,035 real recorded observations. Active filtering retains **576 total
+  (218 LOW / 358 HIGH)**, rejects **459 redundant**, with **zero capacity
+  rejections** on this recording. Mean variance near initial samples ends at
+  0.0847558. Full-update median/max were 0.03013/0.06313 s locally with
+  single-thread BLAS. This workload does not fill the new budget, so these are
+  not full-capacity or live ROS timing guarantees. The figure was inspected.
+  The comparison remains historical 250/250 FIFO versus the current filtered
+  budget, not a claim to isolate only budget size.
+- Files changed/added: active/archived scenario YAMLs,
+  `tests/test_deployment_estimator.py`, `tests/test_deployment_epistemic_filter.py`,
+  `docker/epistemic_filter_probe.py`, visual generator and two assets,
+  Docker README, mathematical reference and this record.
+- Regressions: none found apart from the intended larger memory/compute
+  allowance. No GP/filter mathematics, controllers or freshness limits changed.
+  No live services were restarted or commanded. Restart the deployment in
+  HOLD and repeat readiness to load the new manifest consistently. The
+  production change is mounted configuration; the usual `up --motion` rebuild
+  also refreshes the diagnostic probe in the image.
+
+
+## Paper-based filtering, shared HIGH objective and 500-sample budget (2026-11-04)
+
+- Read the supplied eight-page PDF, especially Section VI, Algorithm 1 and
+  Eqs. (18)–(19), from
+  `docs/biblio/Distributed_Coverage_Control_for_Spatial_Processes_Estimation_With_Noisy_Observations.pdf`.
+  Used `pdftotext -layout` and rendered/inspected PDF page 5 with `pdftoppm` to
+  verify the algorithm and mathematical symbols. The paper is Mantovani,
+  Pratissoli and Sabattini (2024), DOI 10.1109/LRA.2024.3381809. It admits
+  samples using latent standard deviation against $e(\mu_{max}-\mu_{min})/z$,
+  with typical $e=0.05$, $z=1.96$; it does not impose a fixed dataset cap.
+- Restored the previous total GP capacity (500 instead of 2,000). Incorporated
+  the user's subsequent steering: one **shared 500-sample budget**, with no
+  separate LOW/HIGH quotas, and one HIGH-field information objective. Active
+  `policy: paper_epistemic`, `criterion: high_information` scores each sample
+  by the square root of expected HIGH variance reduction at its location,
+  using the conditional cross-fidelity covariance and observation noise.
+  Both fidelities use the same HIGH-mean-range threshold. The faithful
+  native-standard-deviation criterion remains available explicitly. The
+  mathematical reference distinguishes the original paper from these central
+  multi-fidelity and finite-budget extensions; no claim of literal distributed
+  single-fidelity reproduction is made.
+- Added LOW marginals and mixed latent covariance to the pure GP math via
+  Cholesky solves. Within a scheduled update, accepted observations condition
+  later candidates by rank-one covariance updates; there is at most one GP
+  fit. Exact record duplicates are skipped, while independent noisy readings
+  at the same location may still be useful. Existing admitted observations
+  are preserved; capacity-rejected additions are reported when the budget is
+  full. Saturation can stop learning new areas; no globally optimal selection
+  or unlimited-memory guarantee is claimed. Fixed-kernel retained nested data
+  avoid the prior age-eviction forgetting behavior without clamping variance.
+- Rejection-only updates clear pending data transactionally without refitting
+  or changing the snapshot/version. The static central runtime republishes
+  valid arrays with current tick `timestamp`, original `posterior_timestamp`
+  and `model_updated: false`; failed updates do not refresh the target. Pose,
+  plan and lease freshness checks were not relaxed. Filter failure preserves
+  GP, buffers, version, diagnostics and pending data for retry. Historical
+  configurations keep newest-first retention unless explicitly enabled.
+- Files added: `src/core/epistemic_sample_filter.py`,
+  `tests/test_epistemic_sample_filter.py`,
+  `tests/test_multifidelity_joint_prediction.py`,
+  `tests/test_epistemic_retention_integration.py`,
+  `tests/test_deployment_epistemic_filter.py`,
+  `docker/epistemic_filter_probe.py`,
+  `examples/plot_epistemic_retention_milestone.py`,
+  `docker/scenarios/sitl_three_drone_1000_samples_role_speeds.yaml`, and
+  `docs/assets/sitl/epistemic_retention{.png,_metrics.json}`. Files revised:
+  `src/core/{observations,multifidelity_gp,multifidelity_estimator,deployment_estimator}.py`,
+  `docker/{deployment_runtime,ros_central}.py`, active SITL YAML,
+  `tests/test_deployment_estimator.py`, historical retention plotting script,
+  Docker README, deployment plan/interface specification, mathematical reference
+  and this record. The archived scenario preserves hashes for existing runs;
+  role speeds (1.0/0.5 m/s) are unchanged.
+- Test-first filter imports failed before implementation. GP/filter components
+  then passed 50 tests; initial integration tests exposed absent settings/buffer
+  hooks and publication semantics, which were implemented before continuing.
+  Native integration passed 177 tests. Shared-budget test-first checks failed
+  as expected; subsequent integration caught an omitted dataclass field (25
+  related failures), reported to the user and fixed before further work. Final
+  command `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m pytest -q
+  tests/test_epistemic*.py tests/test_multifidelity_joint_prediction.py
+  tests/test_deployment*.py tests/test_observations.py tests/test_multifidelity_estimator.py
+  tests/test_multifidelity_gp.py tests/test_multifidelity_gp_contract.py
+  tests/test_aerial_multifidelity_feedback.py tests/test_ground_multifidelity_feedback.py
+  tests/test_timed_mission.py tests/test_mission_lease.py
+  tests/test_plot_sitl_summary.py tests/test_replay_sitl.py --tb=short`
+  passed **201 tests in 6.36 s**. Scoped Ruff lint/format, Python compilation,
+  Compose configuration and `git diff --check` passed. An unused test import
+  flagged by Ruff during integration was removed and rechecked.
+- Numerical contracts cover original paper threshold equality, exclusion of
+  aleatoric noise in native mode, sequential noisy conditioning, native and
+  common HIGH criteria, zero HIGH information for uncorrelated LOW samples
+  (including an actual $\rho=0$ MFGP), shared budget with unequal splits,
+  exact duplicates, full-capacity protection, rejected-update refresh, rollback,
+  and active filtered HIGH → posterior/variance → aerial density → onboard
+  command change. Existing simulation/legacy feedback tests remain passing.
+- `OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MPLCONFIGDIR=/tmp/mpl-sitl
+  PYTHONPATH=. .venv/bin/python examples/plot_epistemic_retention_milestone.py`
+  recomputes both policies on 1,035 identical recorded observations from the
+  aborted faster-aerial mission. It validates source scenario identity and
+  unchanged sensing/field inputs and starts from an empty model (pre-recording
+  GP state is unavailable), so it is an offline paired retention comparison,
+  not an exact posterior replay or new flight. Shared filtering retains
+  **196 LOW / 304 HIGH**, rejects **398 redundant** and **137 at capacity**;
+  original FIFO retains 250/250. Mean HIGH variance near initial samples ends
+  at **0.0861834 versus 0.700247**. Filtered GP fits decrease from 58 to 45.
+  Single-thread local full-update median/max were **0.01777/0.05046 s** with
+  filtering versus **0.04501/0.08285 s** for FIFO. Timing is diagnostic, not a
+  ROS/hardware guarantee. The deterministic spatial/history PNG was inspected
+  at original resolution; numeric results are saved in its companion JSON.
+- Docker build initially failed on sandbox buildx state writes; authorized
+  `docker compose -f docker/compose.yaml build central` succeeded. The first
+  isolated probe failed on sandbox socket access; authorized runs used
+  `docker run --rm --network none -e ROS_DOMAIN_ID=101/102 mfgp-deployment:local
+  docker.epistemic_filter_probe` / `docker.role_speed_probe`. The central ROS
+  probe passed filter admission, HIGH-to-aerial velocity change **0.00420385
+  m/s**, shared capacity and fresh publication without refitting. The role
+  probe passed 40 aerial commands at 0.8 m/s, ground rejection of that speed,
+  and aerial rejection above 1 m/s. Neither probe had a network path to live
+  vehicles. Image is rebuilt; no live deployment restart or mission occurred.
+- Regressions/limitations: no unintended numerical regressions found. Intended
+  behavior changes are bounded information-based admission, protected retained
+  samples, shared capacity and explicit static-posterior refresh metadata.
+  The budget can still fill and reject useful new data; innovation/outlier
+  filtering and time-varying fields are outside this static paper approach.
+  Restart all deployment services in HOLD and repeat readiness before a new
+  moving trial; a successful 240 s live mission has not been established here.
+
+
+## Aerial speed 1.0 m/s, ground speed 0.5 m/s (2026-11-04)
+
+- Added optional `control.max_speed_by_role_mps` mapping, with finite-positive
+  validation and fallback to the historical `control.max_speed_mps`. Active
+  SITL limits are aerial **1.0 m/s** and ground **0.5 m/s**. The agent resolves
+  its role limit once and passes it to both the onboard planner and command
+  gate; readiness uses the same lookup. Agent status exposes its resolved
+  limit. Old standalone ROS planner wrappers also use role-specific settings.
+  Ground centroid slowing, zero-gradient behavior, command rate, geofence
+  projection and all GP/sensing settings are preserved. Actual measured speed
+  remains subject to vehicle tracking and acceleration limits.
+- Archived the preceding manifest verbatim at
+  `docker/scenarios/sitl_three_drone_1000_samples_equal_speed.yaml`. Existing
+  250-sample archive is unchanged. Updated Docker README and the mathematical
+  reference with the exact speed lookup, proposal/gate equations and code map.
+- Files added/changed: `docker/deployment_settings.py`, `docker/ros_agent.py`,
+  `docker/deployment_readiness.py`, `docker/ros_planner.py`,
+  `docker/ros_ground_planner.py`, active/archived scenario YAMLs,
+  `docker/role_speed_probe.py`, `tests/test_deployment_role_speeds.py`,
+  `examples/plot_role_speed_milestone.py`,
+  `docs/assets/sitl/role_speeds{.png,_metrics.json}`, Docker README,
+  mathematical reference and this record.
+- Test-first role-speed contracts initially failed all 8 cases because the
+  lookup was missing and invalid mappings were ignored. After implementation,
+  the first deployment/mission/feedback selection passed 91 tests. Final
+  command `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m pytest -q
+  tests/test_deployment*.py tests/test_timed_mission.py tests/test_mission_lease.py
+  tests/test_observations.py tests/test_multifidelity_estimator.py
+  tests/test_aerial_multifidelity_feedback.py tests/test_ground_multifidelity_feedback.py
+  tests/test_plot_sitl_summary.py tests/test_replay_sitl.py` passed
+  **137 tests in 5.54 s**. Scoped Ruff lint/format, Python compilation,
+  Compose configuration and `git diff --check` passed.
+- `MPLCONFIGDIR=/tmp/mpl-sitl PYTHONPATH=. .venv/bin/python
+  examples/plot_role_speed_milestone.py` generated real onboard proposals at
+  identical measured poses and central posterior. Aerial speed doubles from
+  0.5 to 1.0 m/s; both ground proposal speeds stay 0.5 m/s. The PNG was inspected
+  at original resolution and the actual vectors are retained in the JSON.
+- Docker build initially failed on sandboxed buildx state writes; authorized
+  `docker compose -f docker/compose.yaml build central` succeeded. The first
+  isolated probe failed on sandbox Docker socket access; authorized reruns
+  used `docker run --rm --network none -e ROS_DOMAIN_ID=101/102
+  mfgp-deployment:local docker.role_speed_probe` / `docker.command_bridge_probe`.
+  The real ROS role probe passed: 40 aerial commands at 0.8 m/s, the same
+  proposal rejected by the ground agent, and 1.1 m/s rejected by the aerial
+  agent. It also checks that agent and planner use identical resolved limits.
+  The existing bridge probe passed seven rejection cases at **19.9996 Hz**,
+  maximum command gap **0.05037 s**. No network path to simulator vehicles
+  existed during either probe.
+- Regressions: none found outside the intended faster aerial motion proposals.
+  Legacy shared-speed manifests still work and existing ground-to-aerial
+  feedback tests pass. The image is rebuilt, but live deployment was not
+  restarted and no mission was started. Restart the entire deployment while
+  drones are in HOLD and rerun readiness before trying the new speeds. Live
+  tracking at 1 m/s and obstacle/inter-drone avoidance remain unvalidated.
+
+
+## Pale grayscale backgrounds in recorded mission replay (2026-11-04)
+
+- Updated `docker/replay_sitl.py`: truth, HIGH mean and HIGH variance use a
+  shared pale grayscale palette (white to `#c4c4c4`). Colored trajectories are
+  thicker with a white outline; robot markers have white edges and render
+  above the fields. Aerial orange and ground green, vehicle line styles,
+  recorded values, fixed value limits and frame selection remain unchanged.
+  Updated `docker/README.md` and this status record. This is presentation only;
+  the mathematical reference remains current because no equations changed.
+- Commands: scoped Ruff format/lint, `git diff --check`, and
+  `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m pytest -q
+  tests/test_replay_sitl.py tests/test_plot_sitl_summary.py` — **8 passed in
+  2.57 s** on the final run, including real FFmpeg export and immutable input checks.
+- Regeneration command: `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m
+  docker.replay_sitl output/sitl/mission.json --scenario
+  docker/scenarios/sitl_three_drone_250_samples.yaml --output
+  output/sitl_replay/mission.mp4 --speed 4 --fps 10`. The archived scenario is
+  required because this completed recording predates the retention increase.
+- The completed replay contains 607 frames at 10 fps (60.7 s at 4× speed),
+  covering 242.278 s of recorder data and 231 posterior packets. FFprobe
+  confirmed H.264/YUV420P at 1300×450. The first final-frame inspection exposed
+  title/colorbar overlap from freezing the layout with an empty suptitle;
+  the initial replay frame is now populated before layout and export, and
+  the video was regenerated. Milestone assets are
+  `docs/assets/sitl/mission_replay_grayscale.png` and
+  `mission_replay_grayscale_metrics.json`; full MP4 is
+  `output/sitl_replay/mission.mp4`.
+- Numerical/behavioral regressions: none. No GP, scheduler, controller,
+  trajectory, field transform, active mission or deployment configuration
+  changed. No new flight validation is claimed.
+
+
+## Increased SITL retention caps to 1,000 per fidelity (2026-11-04)
+
+- Changed only the active `docker/scenarios/sitl_three_drone.yaml` retention
+  configuration from 250 LOW / 250 HIGH to **1,000 LOW / 1,000 HIGH** for the
+  whole team. Retention ordering, exact-position duplicate handling, kernels,
+  noise, sampling, scheduler and controllers are unchanged. No additional
+  filtering or temporal model was added. Forgetting can still occur once the
+  larger finite buffers fill; HOLD sensing consumes the same budgets.
+- Saved the original scenario verbatim as
+  `docker/scenarios/sitl_three_drone_250_samples.yaml`; verified its canonical
+  hash matches the existing `output/sitl/mission.json`. Old plots/replays can
+  use this path with `--scenario`. The example smoke scenario is unchanged.
+  Updated `docker/README.md` and `docs/mathematical_formulation.md` with exact
+  budgets, incoming-rate interpretation, code mapping and restart instructions.
+- Added the test-first deployment integration contract in
+  `tests/test_deployment_estimator.py`: 300 distinct observations per fidelity
+  pass through the real adapter and scheduled GP update and must all survive.
+  It initially failed with an actual retained count of 250, then passed after
+  the configuration change. Existing cap/retention and feedback contracts are
+  retained. Initial relevant selection passed 79 tests. Final command
+  `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m pytest -q
+  tests/test_deployment*.py tests/test_observations.py
+  tests/test_multifidelity_estimator.py tests/test_aerial_multifidelity_feedback.py
+  tests/test_ground_multifidelity_feedback.py tests/test_plot_sitl_summary.py
+  tests/test_replay_sitl.py` passed **120 tests in 5.69 s**.
+- Added `examples/plot_sitl_retention_milestone.py`, exercising the original
+  and enlarged budgets on identical, deterministic truth-derived LOW/HIGH
+  observations (250 initial locations followed by 750 distinct new locations).
+  Command: `OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MPLCONFIGDIR=/tmp/mpl-sitl
+  PYTHONPATH=. .venv/bin/python examples/plot_sitl_retention_milestone.py`.
+  Real output is retained as `docs/assets/sitl/retention_comparison.png` and
+  `retention_comparison_metrics.json`; original-resolution inspection confirms
+  shared variance limits and the retained earlier region.
+- Earlier-region mean HIGH variance starts at 0.00425817. After the new data,
+  the 250-sample budgets yield 0.88999747, while the enlarged budgets yield
+  0.00425815. Final retained counts are 250/250 versus 1,000/1,000. Full local
+  sequential update durations at those capacities were **0.0623 s vs 0.9459 s**
+  with single-thread BLAS; the larger case includes approximately 0.3379 s
+  fitting and 0.1070 s prediction. These are local timing diagnostics, not a
+  hardware or live ROS latency guarantee. The larger update approaches the
+  configured 1 s update period; repeat live readiness under load.
+- Scoped Ruff lint/format, Compose configuration validation and
+  `git diff --check` passed. Files changed/added: active and archived scenario
+  YAMLs, deployment estimator test, milestone script and two generated assets,
+  Docker README, mathematical reference and this status record.
+- Numerical/behavioral regressions: none found beyond the intended longer
+  memory and its measured higher compute cost. Existing ground-to-aerial
+  feedback tests passed; no new live causal flight experiment was performed.
+  The live deployment was not restarted or commanded. Restart all deployment
+  services while drones are in HOLD to load the shared manifest consistently;
+  no application-code rebuild is needed for this mounted configuration.
+
+
+## Final trajectory panel with pale ground truth (2026-11-04)
+
+- Revised `docker/plot_readiness.py` so the final summary trajectory panel
+  overlays measured paths on the hash-verified HIGH truth raster in `Greys`
+  at 22% opacity. The background is drawn beneath paths and endpoint markers;
+  each endpoint uses its path's color. The panel now shows the full scenario
+  extent and is titled “Robot trajectories over ground truth”. Regenerated
+  `docs/assets/sitl/mission.png` from the saved real mission and inspected it
+  at original resolution: the field is subtle and colored paths are readable.
+- Commands: scoped Ruff format/lint; `MPLCONFIGDIR=/tmp/mpl-sitl
+  .venv/bin/python -m pytest -q tests/test_plot_sitl_summary.py
+  tests/test_replay_sitl.py` — **8 passed in 2.80 s**;
+  `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m docker.plot_readiness
+  output/sitl/mission.json --output docs/assets/sitl/mission.png`;
+  `git diff --check`. All passed.
+- Files changed: plotting module, regenerated PNG and this status record.
+  Numerical/behavioral regressions: none; this is plot styling only. No
+  estimator, field transform, control, metric or replay equation changed,
+  so the mathematical reference remains current. No live deployment changes.
+
+
+## Offline recorded SITL mission replay (2026-11-04)
+
+- Added `docker/replay_sitl.py` and `tests/test_replay_sitl.py`; updated
+  `docker/README.md`, `docs/mathematical_formulation.md` and this status record.
+  The CLI exports an H.264 MP4, final-frame PNG and replay metadata JSON.
+  Panels show hash-verified static HIGH truth, recorded HIGH mean and recorded
+  HIGH variance with progressively revealed measured trajectories. Aerial
+  markers are orange triangles; ground markers are green circles with
+  vehicle-specific line styles. Mean/truth and variance color limits remain
+  fixed throughout the clip. No estimator, controller or simulation is rerun.
+- `MissionReplay.snapshot` uses recorder receipt time and the latest available
+  posterior, with no future data or pose interpolation. It supports backwards
+  seeking; estimates remain blank before the first posterior. `frame_times`
+  separates video fps from playback speed and includes the final recorder
+  instant. Full recorder time includes preflight/HOLD and stopping intervals.
+  A report older than the event-log start is rejected to catch overwritten
+  logs from a new mission using an old summary.
+- Test-first imports failed before the replay module existed. Initial focused
+  tests passed 23, then 24 after a real FFmpeg export test; the final focused
+  command `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m pytest -q
+  tests/test_replay_sitl.py tests/test_plot_sitl_summary.py
+  tests/test_deployment_scenario.py tests/test_deployment_estimator.py
+  tests/test_deployment_runtime.py tests/test_deployment_sitl_readiness.py`
+  passed **25 tests in 3.13 s**. Tests cover time selection, progressive paths,
+  backwards seeking, field identity, missing posterior rejection, frame timing,
+  mixed-run rejection and real MP4/PNG/JSON export with unchanged input data.
+  Scoped Ruff lint/format, Python compilation, CLI help and `git diff --check`
+  passed. No full repository suite or new live-flight validation is claimed.
+- The first real render found no posterior because `mission.events.jsonl` was
+  being overwritten for a new active mission while `mission.json` still held
+  the preceding summary. This was reported, and the mixed-run check was added.
+  A fixed, explicitly labeled excerpt was then captured without modifying the
+  active recording. Creating its subdirectory inside `output/sitl` failed due
+  to that directory's container ownership (`nobody`, mode 755); outputs were
+  moved to the host-owned `output/sitl_replay_excerpt/`. The documented command
+  similarly writes to `output/sitl_replay/`, requiring no ownership changes.
+- Render command: `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m
+  docker.replay_sitl output/sitl_replay_excerpt/mission.json --output
+  output/sitl_replay_excerpt/mission.mp4 --speed 4 --fps 10`. The fixed excerpt
+  contains 119 posterior packets (versions 10 through 128) and 247/247/246
+  measured pose samples for uav_1/uav_2/uav_3. Recorded sample-path lengths are
+  56.7381/59.1311/60.4286 m; first-to-last HIGH mean maximum change is 1.03469.
+  These diagnostics verify that real changing saved estimates and measured
+  movement feed the renderer; they are not new simulation or paired causal
+  feedback evidence. Static layout is computed once to reduce export cost.
+  Export completed: `ffprobe` confirms H.264/YUV420P, 1300×450 pixels,
+  10 fps, 310 frames and 31.0 s duration for 123.498 s of recorded data.
+  `docs/assets/sitl/mission_replay_excerpt.png` and
+  `mission_replay_excerpt_metrics.json` retain the milestone visual/metadata;
+  the final frame was inspected for labels, trajectories and matching field
+  orientation. The MP4 is `output/sitl_replay_excerpt/mission.mp4` and is
+  explicitly titled as an excerpt, not a completed current mission.
+- Numerical/behavioral regressions: none. This is a read-only replay; the
+  current mission, ROS graph, saved observations and flight commands are
+  untouched. Existing GP and feedback tests remain relevant and unchanged.
+
+
+## Recorded SITL plot: ground truth replaces proposals (2026-11-04)
+
+- Updated `docker/plot_readiness.py` to replace the proposed-speed panel with
+  the simulated HIGH ground-truth field. The original scenario is rebuilt
+  offline, and its hash must match the recorded report. `--scenario` accepts
+  custom original manifests; the default is `sitl_three_drone.yaml`. Retained
+  targets, trajectories, posterior mean/variance and observation-count panels
+  are unchanged. `src/core/deployment_scenario.py::BuiltScenario` now exposes
+  the existing immutable HIGH raster, without changing field construction.
+- Added `tests/test_plot_sitl_summary.py` before implementation; its initial
+  import failed because `render_summary` did not yet exist. Tests check exact
+  truth raster and orientation, removal of the proposal panel, immutability,
+  and rejection of a different scenario. Updated `docker/README.md`, the
+  mathematical reference's plotting/code map and this status record.
+- Commands: `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m pytest -q
+  tests/test_plot_sitl_summary.py tests/test_deployment_scenario.py
+  tests/test_deployment_field_service.py tests/test_deployment_runtime.py
+  tests/test_deployment_sitl_readiness.py` — **19 passed**. Initial passing
+  tests exposed an empty-trajectory legend warning; the plot now omits that
+  empty legend and the repeated focused selection passes without warnings.
+  Scoped Ruff lint/format and `git diff --check` passed.
+- `MPLCONFIGDIR=/tmp/mpl-sitl .venv/bin/python -m docker.plot_readiness
+  output/sitl/mission.json --output docs/assets/sitl/mission.png` regenerated
+  the actual saved mission summary. Its hash matches the current scenario;
+  original-resolution inspection confirms the truth panel, measured paths,
+  readable axes and absence of planner-proposal curves. The figure retains
+  the run's 7,197 observed command count; this milestone adds no new flight.
+- Numerical/behavioral regressions: none. This is offline visualization and
+  read-only field exposure; saved recordings, estimator updates, sensor
+  samples, control laws and trajectories are unchanged. No Docker rebuild
+  or restart is required for the documented host-side plotting command.
+
+
+## Onboard per-drone deployment planning (2026-11-04)
+
+- Replaced the default shared planner services with one `OnboardPlanner` owned
+  by each `SensingAgent`. Ground agents reuse the existing team Voronoi
+  calculation and retain only their own proposal; the aerial agent owns its
+  HEDAC heat/coverage state. Agent planning runs every 0.5 s independently of
+  the 20 Hz command timer in the same sequential ROS executor. No threads or
+  new middleware were introduced. The Python simulation and central GP are
+  unchanged. This modifies the previously authorized ROS deployment layer.
+- Same-role all-to-all position access uses `/mfgp/team_pose/ground` and
+  `/mfgp/team_pose/aerial`; subscriptions never cross roles. Existing central
+  observation, posterior/target and diagnostic pose streams remain unchanged.
+  Positions include timestamps and registration sessions; no trajectories or
+  distance filtering are required. Missing/stale/inconsistent ground inputs
+  clear the local proposal. Agents no longer consume externally published
+  velocity proposals; they publish their own for diagnostics and readiness.
+- Exactly one aerial vehicle is supported by the deployment adapter. Startup
+  explicitly rejects multiple aerial vehicles until shared coverage-history
+  coordination is implemented. Hardware layout is central estimator/frame
+  registry on the laptop and agent plus planner onboard each drone.
+- Files added: `docker/deployment_onboard_planner.py`,
+  `docker/onboard_planner_probe.py`, `tests/test_deployment_onboard_planner.py`,
+  `examples/plot_onboard_planning_milestone.py`, and
+  `docs/assets/sitl/onboard_planning{.png,_metrics.json}`. Files revised:
+  `docker/ros_agent.py`, `docker/compose.yaml`, `docker/README.md`, `README.md`,
+  `docs/mathematical_formulation.md`, `docs/sitl_to_real_deployment_plan.md`,
+  and this status record. The mathematical reference documents exact team
+  membership, snapshot semantics, timing and equation-to-code mapping.
+- Test-first onboard tests failed at import before the component existed.
+  Initial implementation selection passed 110 tests; the broader selection
+  passed 124. Final command `.venv/bin/python -m pytest -q
+  tests/test_deployment*.py tests/test_timed_mission.py tests/test_mission_lease.py
+  tests/test_common_frame_registration.py tests/test_global_reference.py
+  tests/test_registration_readiness.py tests/test_multifidelity_estimator.py
+  tests/test_multifidelity_sensors.py tests/test_aerial_multifidelity_feedback.py
+  tests/test_ground_multifidelity_feedback.py` passed **126 tests in 5.52 s**.
+  Scoped Ruff lint/format, `compileall`, `bash -n docker/run_sitl.sh`,
+  `git diff --check`, and both Compose configuration checks passed. The single
+  agent configuration initially refused the missing required `VEHICLE_ID`;
+  rerunning with `VEHICLE_ID=uav_1` passed, as documented.
+- `docker compose -f docker/compose.yaml build central` initially failed on
+  sandboxed Docker buildx state writes; the authorized escalated build passed.
+  Both isolated `docker run` calls initially failed on sandbox socket access;
+  authorized reruns with `--rm --network none -e ROS_DOMAIN_ID=101/102
+  mfgp-deployment:local docker.onboard_planner_probe` /
+  `docker.command_bridge_probe` passed. The onboard ROS probe observed 17
+  proposals from all three agents, role-isolated pose stores, no command
+  publishers, and local-plan clearing on missing teammate data. The command
+  bridge probe passed seven rejection cases at **19.9983 Hz**, maximum gap
+  **0.05039 s**. The bridge probe checks command serialization/gating and does
+  not measure timer latency while an active HEDAC planner computes.
+- `MPLCONFIGDIR=/tmp/mpl-onboard PYTHONPATH=. .venv/bin/python
+  examples/plot_onboard_planning_milestone.py` generated the deterministic
+  visual and JSON from real sequential estimator/planner outputs; the PNG was
+  inspected. Ground velocities match the shared calculation exactly (maximum
+  absolute errors 0, 0 m/s). A real ground HIGH batch changes posterior mean
+  by at most **0.609207**, aerial target by **0.000288697**, and onboard aerial
+  velocity by **0.273530 m/s** in the paired fixed-pose check. This verifies
+  observation → posterior → target → onboard aerial proposal, not live flight.
+- Numerical regressions: none found in equivalent-input checks. Operational
+  change: planning now executes onboard, sharing the agent's executor; command
+  timer latency under full live planning load still needs measurement. No live
+  deployment was started, stopped or commanded. Repeat HOLD readiness after
+  rebuilding/restarting; previous live evidence predates this layout. Remove
+  old shared planner containers when upgrading. Moving SITL, multi-host
+  operation, obstacle/inter-drone avoidance and hardware validation remain open.
+
+
+## Fixed-duration recorded mission runner (2026-11-03)
+
+- Added `docker/timed_mission.py`, `docker/ros_timed_mission.py`, `docker/mission_lease.py`, `docker/timed_mission_probe.py`, `tests/test_timed_mission.py` and `tests/test_mission_lease.py`. Extended the command gate/agent, settings, command probe, readiness recorder, Compose tools service, `run_sitl.sh`, scenario and command-gate tests. Updated Docker README, mathematical formulation and deployment plan. The runner waits for three ready HOLD snapshots with command-enabled agents and available MULLET services, starts the whole team, records the run, and requests HOLD for every vehicle at a monotonic deadline measured from the first start request. It also stops on cancellation, start failure/timeout or unhealthy running state. It confirms fresh reported HOLD states; it does not take off or land.
+- The default SITL configuration now explicitly requires a mission lease, renewed at 10 Hz with a 0.5 s expiry. The agent command gate refuses commands without a current lease. The timed runner revokes it before requesting HOLD; process loss stops renewal and invokes the existing command-loss behavior. This intentionally replaces manual start-only operation for the default scenario; the documented `mission --duration` command is required after rebuilding/restarting the deployment. The original Python simulation and GP equations are unchanged.
+- Test-first timer/lease imports failed before implementation. `.venv/bin/python -m pytest -q tests/test_timed_mission.py tests/test_mission_lease.py tests/test_deployment*.py tests/test_common_frame_registration.py tests/test_global_reference.py tests/test_registration_readiness.py tests/test_multifidelity_estimator.py tests/test_multifidelity_sensors.py tests/test_aerial_multifidelity_feedback.py tests/test_ground_multifidelity_feedback.py` passed **120 tests in 6.20 s**. Scoped Ruff lint/format, shell syntax, Python compilation and Compose configuration checks passed after correcting a lambda assignment and unused import. The isolated ROS integration initially exposed a reserved `rclpy.Node.clients` property name; it was renamed and retested.
+- Authorized Docker builds succeeded. `docker run --rm --network none -e ROS_DOMAIN_ID=101 mfgp-deployment:local docker.timed_mission_probe` passed normal completion, rejected partial start, cancellation, and disabled-agent refusal using emulated MULLET services. The requested 1 s normal run measured a **1.00053 s** command phase and confirmed all three HOLD states. Partial-start failure and cancellation also confirmed all three HOLD states and returned non-success; disabled agents triggered no service calls. `docker.command_bridge_probe` on the same isolated image passed **7 rejection cases** including expired lease, at **19.9953 Hz** with a **0.05029 s** maximum gap. The actual CLI in an empty isolated ROS graph correctly exited 1 with `readiness_timeout`, without starting a mission.
+- `docs/assets/sitl/timed_mission_metrics.json`, `timed_command_bridge_metrics.json` and `timed_mission.png` retain and visualize those real isolated implementation outputs. The live MULLET session was read-only checked to be in HOLD; no real simulator start/hold service or drone command was issued during this milestone. Existing live containers have not been rolled forward; `bash docker/run_sitl.sh up --motion` rebuilds/recreates them before the user's timed trial. Live physical stopping time, moving SITL behavior and real-world flight remain unvalidated. Duration bounds when HOLD is requested, not instantaneous vehicle stopping.
+
+## Post-run field and trajectory panels (2026-11-03)
+
+- Extended `docker/plot_readiness.py` to display recorded final HIGH posterior mean and variance alongside the existing aerial target, measured map trajectories, retained counts and proposed speeds. Updated `docker/README.md` to state that recording must be started explicitly; Compose alone does not archive a mission. The new `docs/assets/sitl/three_drone_field_summary.png` uses the saved real HOLD-run messages; it does not show an executed moving mission or rerun any estimator.
+- `MPLCONFIGDIR=/tmp/mpl-deployment .venv/bin/python -m docker.plot_readiness output/sitl/three_drone_ready_final.json --output docs/assets/sitl/three_drone_field_summary.png` rendered successfully; `.venv/bin/python -m pytest -q tests/test_deployment_runtime.py tests/test_deployment_sitl_readiness.py` passed 8 tests; scoped Ruff lint/format passed. No numerical equations, estimator, controller or runtime behavior changed, so the mathematical reference is unchanged.
+
+## Three-drone SITL launch and readiness (2026-11-03)
+
+- The full default Compose stack now starts the shared central field/MFGP, frame registry, both planners and all three agents, with command output disabled. Added `docker/scenarios/sitl_three_drone.yaml` using map bounds -10 to 50 m and target local heights 5/5/10 m, matching the user's airborne SITL setup. Added shared settings validation, read-only readiness/recording, a plotting tool, startup/stop wrapper, single-drone Compose, entrypoint and restricted Docker build context. Rewrote `docker/README.md` with exact launch, check, external MULLET MISSION/HOLD and stop instructions and linked it from the main README. Updated `docs/mathematical_formulation.md` and the deployment plan.
+- Production deployment files added or changed: `.dockerignore`; `docker/{Dockerfile,compose.yaml,compose.drone.yaml,entrypoint.sh,run_sitl.sh,README.md,deployment_settings.py,deployment_readiness.py,ros_readiness.py,plot_readiness.py,command_bridge_probe.py}`; `docker/scenarios/sitl_three_drone.yaml`; the existing deployment command gate, agent, frame registry, planners and central runtime/wrapper. Tests added/extended: `tests/test_deployment_sitl_readiness.py`, command-gate, frame-registry and runtime tests. This does not change the existing Python simulation paths or GP mathematics.
+- Commands: `.venv/bin/python -m pytest -q tests/test_deployment*.py tests/test_common_frame_registration.py tests/test_global_reference.py tests/test_registration_readiness.py tests/test_multifidelity_estimator.py tests/test_multifidelity_sensors.py tests/test_aerial_multifidelity_feedback.py tests/test_ground_multifidelity_feedback.py` — **110 passed in 6.30 s**. Scoped Ruff lint and formatting, shell syntax, both Compose configurations and Python compilation passed. Test-first checks failed before the settings/readiness modules existed, and additional red tests exposed missing namespace uniqueness, frame-session binding and latched reference-origin failure; these were implemented and retested. The observation-record contract initially failed until raw accepted measurements were added to responses. The full repository suite was not rerun; older known failures are not claimed fixed.
+- Authorized Docker build succeeded. The initial live readiness invocation failed because Compose replaced the Python module with `--timeout`; a dedicated readiness entrypoint fixed it. The next live check correctly failed while the scenario expected 3 m but the ground drones held near 5 m. After matching the scenario to the user's actual 5/5/10 m takeoff, the final read-only run passed three consecutive ready evaluations and recorded five seconds: `output/sitl/three_drone_ready_final.json` and its `.events.jsonl`. Its snapshot has all vehicles registered, height checks true, fresh proposals, retained LOW/HIGH counts 126/250, zero central errors, and **zero observed command messages**. The final report's central status was version 21 while the latest proposals referenced version 22; these asynchronous snapshots are deliberately not required to be simultaneous.
+- `docker run --rm --network none -e ROS_DOMAIN_ID=101 mfgp-deployment:local docker.command_bridge_probe` passed on the final image: **20.007 Hz**, maximum command gap **0.05072 s**, six rejection cases (expired plan, expired frame, stale heartbeat, wrong height, HOLD and wrong namespace). It checks actual MULLET message serialization and cessation of publication in an isolated ROS graph. Results are retained in `docs/assets/sitl/command_bridge_metrics.json`; this is not vehicle tracking evidence.
+- `MPLCONFIGDIR=/tmp/mpl-deployment .venv/bin/python -m docker.plot_readiness output/sitl/three_drone_ready_final.json --output docs/assets/sitl/three_drone_preflight.png` generated the milestone visual from recorded target arrays, map poses, sample counts and proposals. It was inspected for labels and absence of any motion claim. The deployment was left running with `ENABLE_COMMANDS=0` and all user drones in HOLD; no takeoff, landing, MISSION or HOLD service was called.
+- Intentional deployment changes: the map now includes negative startup drift, altitude validation matches 5/5/10 m, requests have freshness checks, commands have an altitude and projected-map-bound guard, and frame-session/namespace identity is enforced. A detected reference-frame failure latches registration off until deployment restart instead of silently moving the map. No existing simulation numerical or behavioral regression was introduced. Ground obstacle avoidance remains deferred at user request. Actual three-drone tracking, live command-loss vehicle behavior, a paired live HIGH-to-aerial motion intervention, multi-host networking and real-world deployment remain unvalidated. The result is ready for a supervised SITL motion test, not completion of physical flight validation.
+
+## Optional MULLET command bridge (2026-11-03)
+
+- Added `docker/deployment_command_gate.py`, `docker/command_bridge_probe.py`, and `tests/test_deployment_command_gate.py`; extended agent, Dockerfile and Compose; updated Docker README, mathematical reference and deployment plan. Opt-in `ENABLE_COMMANDS=1` enables a 20 Hz planar VELOCITY stream only for accepted bounded expiring proposals, current registration and fresh valid MISSION telemetry. Default remains disabled. No automatic mission-start, takeoff or landing is implemented. `docs/assets/sitl/command_gate.png` plots actual gate outputs.
+- Test-first gate tests failed at import before implementation. `.venv/bin/python -m pytest -q tests/test_deployment_command_gate.py tests/test_deployment_agent_gate.py tests/test_deployment_frame_registry.py tests/test_deployment_planner_runtime.py tests/test_deployment_ground_runtime.py` passed 17 tests; scoped Ruff lint passed. Authorized Docker build succeeded. An isolated `docker run --rm --network none` command-delivery probe first failed because domain 233 exceeded DDS's port range; rerun with domain 101 passed, checking VELOCITY mode, horizontal velocities and NaN unused fields. Networking was disabled and no commands reached the user's drones. Live closed-loop tracking, scenario startup bounds, two-drone role configuration and real-world safety remain unvalidated.
+
+## Automatic SITL common-frame registration (2026-11-03)
+
+- Added `docker/deployment_frame_registry.py`, `docker/ros_frame_registry.py`, and `tests/test_deployment_frame_registry.py`; extended sensing-agent offset invalidation and frame-topic subscription, Dockerfile and Compose; updated Docker README, mathematical reference and deployment plan. The registry estimates per-vehicle aligned-NED offsets from fresh stationary heartbeat pairs using zero-height WGS84 surface projection, publishes short-lived offsets, and clears offsets on selected relative inconsistencies, invalid telemetry or heartbeat sequence restart. This is a SITL prototype, not validated flight localization; it does not establish GPS accuracy, true sensor acquisition synchronization, heading alignment or detect every PX4 reset.
+- Test-first `.venv/bin/python -m pytest -q tests/test_deployment_frame_registry.py` initially failed at import; added tests for missing invalidation methods failed until implemented. Final `.venv/bin/python -m pytest -q tests/test_deployment_frame_registry.py tests/test_deployment_agent_gate.py tests/test_global_reference.py tests/test_registration_readiness.py tests/test_deployment_runtime.py tests/test_deployment_ground_runtime.py tests/test_deployment_planner_runtime.py` passed 18 tests; scoped Ruff lint and format checks passed. Authorized Docker build and sensing-only Compose startup against live MULLET returned offsets `uav_1=(0,0)`, `uav_2=(0.00235,4.99538)` m; registered pose samples were approximately `uav_1=(-0.0453,0.0324)` and `uav_2=(0.0010,4.9893)` m. `docs/assets/sitl/automatic_frame_registration.png` plots those live outputs. The samples were not independently synchronized against Gazebo truth and do not establish registration accuracy. Test services were stopped, MULLET left running, and no vehicle commands sent. One observed pose lay slightly outside the example scenario's nonnegative map, so live sampling may be rejected near its boundary; the map and startup placement still need alignment.
+
+## ROS ground-role velocity proposals (2026-11-03)
+
+- Added `docker/deployment_ground_planner.py`, `docker/deployment_ground_runtime.py`, `docker/ros_ground_planner.py`, and corresponding tests; extended central posterior output, Dockerfile, Compose, README, mathematical reference and deployment plan. Weighted Voronoi centroids are tested against the existing ground implementation; the ROS proposal service requires fresh poses for every configured ground vehicle and a fresh HIGH posterior. The calculation has no obstacle avoidance or command publisher.
+- Tests were written first: ground planner and runtime imports initially failed; the central-runtime test failed until HIGH density and integration weights were included. Final `.venv/bin/python -m pytest -q tests/test_deployment_ground_planner.py tests/test_deployment_ground_runtime.py tests/test_deployment_runtime.py tests/test_deployment_estimator.py tests/test_ground_multifidelity_feedback.py` passed 21 tests; scoped Ruff lint passed. The authorized Docker image build succeeded; synthetic ROS HIGH observations and two poses yielded proposals for both `uav_1` and `uav_2`, with velocity (-0.5, 0) and (0.5, 0) m/s respectively. `docs/assets/sitl/ros_ground_proposals.png` visualizes the synthetic output. No vehicle commands were sent; test services were stopped and MULLET left running. Frame registration, obstacle handling and command integration remain incomplete.
+
+## ROS aerial velocity proposal (2026-11-03)
+
+- Added `docker/deployment_planner_runtime.py`, `docker/ros_planner.py`, and `tests/test_deployment_planner_runtime.py`; extended `docker/ros_agent.py`, Dockerfile and Compose, and updated Docker README, mathematical formulation and deployment plan. The agent publishes map-frame sensing poses; the optional proposal-only aerial planner checks matching identity, fresh pose/target and square structured grid before calling the HEDAC adapter. It publishes expiring velocity proposals, not MULLET commands. It does not implement ground-role planning, frame registration, clock verification or flight safety.
+- Test-first `.venv/bin/python -m pytest -q tests/test_deployment_planner_runtime.py` failed at import before implementation. Final `.venv/bin/python -m pytest -q tests/test_deployment_planner_runtime.py tests/test_deployment_hedac_planner.py tests/test_deployment_agent_gate.py tests/test_deployment_runtime.py tests/test_deployment_estimator.py` passed 12 tests; scoped Ruff lint/format passed. Authorized `docker compose -f docker/compose.yaml build central` and `docker compose -f docker/compose.yaml --profile planner up -d central aerial-planner` built and started the services. A synthetic ROS sample/pose from the MULLET container yielded a version-1 proposed velocity (0.234, 0.442) m/s; `docs/assets/sitl/ros_planner_proposal.png` visualizes that output. No command was sent to any vehicle; test containers were stopped afterward and MULLET left running. This is a synthetic ROS integration test, not closed-loop flight evidence.
+
+## Offline deployment HEDAC feedback (2026-11-03)
+
+- Added `docker/deployment_hedac_planner.py` and `tests/test_deployment_hedac_planner.py`; updated mathematical formulation and deployment plan; generated `docs/assets/sitl/deployment_hedac_feedback.png` from the real scenario service, central estimator, target and HEDAC adapter. In a deterministic intervention, the command vector changed from approximately (0.468, 0.884) to (-0.067, 0.998) after a HIGH batch. This proves an offline calculation, not commanded drone behavior or trajectory.
+- Test-first `.venv/bin/python -m pytest -q tests/test_deployment_hedac_planner.py` failed at import before implementation. The resulting three tests pass, including a HIGH-observation-to-velocity test. The adapter is not connected to ROS or a drone and has not undergone controller timing, map-boundary, frame or flight safety validation; existing simulation behavior remains unchanged.
+
+## WGS84 local tangent projection (2026-11-03)
+
+- Added `src/core/global_reference.py` and `tests/test_global_reference.py`, updated mathematical formulation and deployment plan, and generated `docs/assets/sitl/geodetic_projection.png` from the previously observed, unsynchronized MULLET lat/lon snapshots using zero ellipsoidal heights. Their projected north/east displacement was approximately (-0.033, 4.991) m. This illustrative comparison is not a synchronized registration or an accuracy measurement. The function requires ellipsoidal height while MULLET heartbeat documents mean-sea-level altitude; a conversion or a separately justified horizontal approximation is required before connecting them.
+- Test-first `.venv/bin/python -m pytest -q tests/test_global_reference.py` failed at import before implementation. Final `.venv/bin/python -m pytest -q tests/test_global_reference.py tests/test_common_frame_registration.py tests/test_registration_readiness.py tests/test_deployment_agent_gate.py tests/test_deployment_estimator.py` passed 19 tests; scoped Ruff lint/format passed. No existing simulation behavior changed. Source accuracy, timing, frame resets, control and real deployment remain unvalidated.
+
+## ROS sensing-agent prototype (2026-11-03)
+
+- Added `docker/deployment_agent_gate.py`, `docker/ros_agent.py`, `tests/test_deployment_agent_gate.py`; updated Dockerfile, Compose, Docker README, mathematical reference and deployment plan. The image builds the user's local MULLET interface definitions using the `mullet_interfaces` named build context. The sensing-only agent consumes heartbeat and matching central status and publishes simulated-sample requests for a known fixed local-to-map offset; it publishes no vehicle commands. `uav_1` uses zero offset by definition; `uav_2` has no offset and remains idle. No automatic registration, origin-reset detection, clock verification, coverage control, obstacle avoidance or flight readiness is implemented.
+- Test-first `.venv/bin/python -m pytest -q tests/test_deployment_agent_gate.py` failed at import before implementation. Final `.venv/bin/python -m pytest -q tests/test_deployment_agent_gate.py tests/test_deployment_runtime.py tests/test_deployment_estimator.py tests/test_deployment_scenario.py tests/test_deployment_field_service.py` passed 16 tests; scoped Ruff lint/format passed. Authorized `docker compose -f docker/compose.yaml build central` built local MULLET interfaces. Authorized `docker compose -f docker/compose.yaml --profile agents up -d central agent-uav1 agent-uav2` ran the services against the existing simulator. Live ROS inspection observed `uav_1` requests, central target version 11 with 441 points, and 8 `uav_1` requests and zero `uav_2` requests in a four-second probe; `docs/assets/sitl/ros_agent_live_probe.png` plots the observed counts. Test containers were stopped afterward; the user's MULLET simulator was left running. No vehicle command was published. No existing simulation behavior changed. User's request to defer obstacle avoidance remains in effect.
+
+## ROS central sensing prototype (2026-11-03)
+
+- Added `docker/deployment_runtime.py`, `docker/ros_central.py`, and `tests/test_deployment_runtime.py`; updated Dockerfile, Compose, Docker README and deployment plan. The experimental central node uses ROS 2 String/JSON topics for sample requests, acknowledgments, status and aerial targets; the status explicitly reports `flight_ready=false`. It does not subscribe to MULLET telemetry or publish commands. The process has no authentication, freshness checks, synchronized clock validation, persistence or flight safety logic.
+- Test-first `.venv/bin/python -m pytest -q tests/test_deployment_runtime.py` failed at import before implementation. Final `.venv/bin/python -m pytest -q tests/test_deployment_runtime.py tests/test_deployment_compose_demo.py tests/test_deployment_estimator.py tests/test_deployment_scenario.py tests/test_deployment_field_service.py` passed 15 tests; scoped Ruff lint and format checks passed. Sandboxed Docker build failed because buildx's state directory was read-only; authorized build succeeded. Started the central container with `docker compose -f docker/compose.yaml up -d central`; from the existing MULLET container, ROS discovered all four topics and read `sensing_only` status. A synthetic LOW sample request from that container yielded posterior version 1 and 441 target points, observed through a transient-local ROS subscription. `docs/assets/sitl/ros_central_probe.png` visualizes the observed version and grid count. No vehicle command or service was sent. Stopped only the test central container afterward to discard synthetic estimator state; MULLET was not stopped. No existing simulation behavior or mathematical equations changed. Per-drone agents, shared-frame registration, planner and commands remain outstanding.
+
+## Compose deployment-core smoke (2026-11-03)
+
+- Added `docker/Dockerfile`, `docker/compose.yaml`, `docker/README.md`, `docker/__init__.py`, `docker/deployment_smoke.py` and `tests/test_deployment_compose_demo.py`; updated deployment plan; generated `docs/assets/sitl/compose_smoke.png` from smoke runner output. The isolated Compose project builds from the MULLET PX4/ROS base, installs Python dependencies and runs the existing scenario and central estimator once. It does not connect to ROS or command drones, and is not an onboard deployment image.
+- The test-first `.venv/bin/python -m pytest -q tests/test_deployment_compose_demo.py` failed at import before implementation. Final `.venv/bin/python -m pytest -q tests/test_deployment_compose_demo.py tests/test_deployment_estimator.py tests/test_deployment_scenario.py tests/test_deployment_field_service.py` passed 13 tests; scoped Ruff checks passed. The first sandboxed Docker build failed because Docker's buildx state directory is read-only; the authorized escalated build succeeded. `docker compose -f docker/compose.yaml up --build --abort-on-container-exit --exit-code-from deployment-smoke` exited 0 with 3 LOW and 3 HIGH samples, posterior version 2, and target maximum change 0.000288696597. An unrelated orphan-container warning prompted an explicit isolated Compose project name; a second run exited 0 without that warning. No unrelated container was removed. No existing simulation behavior or mathematics changed. Live ROS, drone agents, commands, frame registration and hardware readiness remain outstanding.
+
+## Deployment aerial target (2026-11-03)
+
+- Extended `src/core/deployment_estimator.py` and `tests/test_deployment_estimator.py` to expose the existing normalized posterior interest/uncertainty target; updated the mathematical reference and deployment plan and generated `docs/assets/sitl/deployment_aerial_target.png` from real deployment estimator outputs. A HIGH batch changes both HIGH posterior and aerial target; no command or trajectory is connected.
+- Test-first `.venv/bin/python -m pytest -q tests/test_deployment_estimator.py` failed because the target method was absent. After implementation `.venv/bin/python -m pytest -q tests/test_deployment_estimator.py tests/test_deployment_scenario.py tests/test_deployment_field_service.py tests/test_aerial_multifidelity_feedback.py` passed 20 tests. No existing simulation behavior changed. ROS, planning, command streaming, and full closed-loop deployment remain outstanding.
+
+## Deployment estimator adapter (2026-11-03)
+
+- Added `src/core/deployment_estimator.py` and `tests/test_deployment_estimator.py`; updated the mathematical reference and deployment plan; generated `docs/assets/sitl/deployment_estimator_update.png` using actual scenario-service observations and central estimator outputs. The sequential adapter builds one central MFGP, queues role-checked idempotent batches, performs explicit period-limited updates and rejects due updates with future pending observations. It uses a product trapezoidal grid without obstacle masking. It is not wired to ROS, planning or flight control.
+- The test-first deployment estimator suite failed at import before implementation. A subsequent test exposed future observations being usable in an earlier update; the adapter was corrected and retested. Final `.venv/bin/python -m pytest -q tests/test_deployment_estimator.py tests/test_deployment_scenario.py tests/test_deployment_field_service.py tests/test_multifidelity_estimator.py tests/test_aerial_multifidelity_feedback.py` passed 34 tests; scoped Ruff checks passed. No existing simulation behavior changed. Clock synchronization, stale-data rules, full scenario validation, obstacle masking, target/command feedback and transport remain outstanding.
+
+## Deployment sensing scenario builder (2026-11-03)
+
+- Added `src/core/deployment_scenario.py` and `tests/test_deployment_scenario.py`; updated the example manifest comment, deployment plan and mathematical reference; generated `docs/assets/sitl/loaded_scenario_samples.png` from actual loaded scenario and sensor output. The builder validates its supported sensing subset, rasterizes circles, builds static Gaussian-mixture HIGH and smoothed LOW fields, hashes the input manifest, and creates role-specific field-service sensors. The fields remain defined over obstacles to support unoccluded LOW sampling. It does not validate flight readiness, register frames, resolve external assets or integrate ROS or an estimator.
+- Test-first `.venv/bin/python -m pytest -q tests/test_deployment_scenario.py` failed at import before implementation. Final `.venv/bin/python -m pytest -q tests/test_deployment_scenario.py tests/test_deployment_field_service.py tests/test_multifidelity_sensors.py tests/test_aerial_multifidelity_feedback.py` passed 33 tests; scoped Ruff lint and format checks passed. No existing simulation behavior changed. The hash covers the supplied JSON-compatible manifest, not a fully resolved asset bundle; flight settings may remain unset and must not be treated as validated.
+
+## Transport-independent deployment field service (2026-11-03)
+
+- Added `src/core/deployment_field_service.py` and deterministic tests `tests/test_deployment_field_service.py`, updated the mathematical reference and deployment plan, and generated `docs/assets/sitl/deployment_field_service.png` from actual seeded service output. The Python object owns copied HIGH/LOW rasters, raster map and per-sensor RNGs; translates metric map positions and ranges to grid units; reuses existing sensing and optional LOS; returns metric `Observation` batches; and replays identical request IDs from a bounded in-memory cache. Conflicting IDs, full cache, invalid positions and scenario mismatches are rejected. This component is not integrated with ROS, Docker, a scenario manifest, the estimator or flight control.
+- Test-first `.venv/bin/python -m pytest -q tests/test_deployment_field_service.py` initially failed at import before implementation. Final `.venv/bin/python -m pytest -q tests/test_deployment_field_service.py tests/test_multifidelity_sensors.py tests/test_observations.py tests/test_aerial_multifidelity_feedback.py` passed 51 tests. Scoped Ruff lint and formatting passed. No existing simulation behavior changed. Request cache is process-local and bounded; restart recovery, source authentication, request ordering, shared clock/pose validation, map distribution and concurrency are not implemented.
+
+## Symmetric obstacle-policy pilot (2026-11-03)
+
+- Added `evaluation/obstacle_policy_pilot.py` and `tests/test_obstacle_policy_pilot.py`; updated mathematical formulation and deployment plan. `MPLCONFIGDIR=/tmp/mpl-deployment .venv/bin/python -m evaluation.obstacle_policy_pilot --output docs/assets/sitl/obstacle_policy_pilot.png` generated a deterministic visual from real pilot output.
+- In the one symmetric target-behind-obstacle case, both stalled: existing repulsion/raster guard had 174 stalled steps, minimum sampled circle clearance 2.910 m and terminal target distance 14.910 m; CBF plus circular and raster guards had 154 stalled steps, clearance 0.529 m and terminal distance 12.529 m (174 CBF interventions, no infeasible steps). Both use the same nominal goal tracker and raster guard; this is not a full coverage comparison. Clearance is point-sampled against a circle, and does not measure continuous trajectory clearance.
+- Test-first `.venv/bin/python -m pytest -q tests/test_obstacle_policy_pilot.py` failed at import before the runner existed; the first implementation run exposed a syntax error in the pilot metrics which was corrected. Final `.venv/bin/python -m pytest -q tests/test_obstacle_policy_pilot.py tests/test_unicycle_cbf.py tests/test_circular_ground_obstacles.py tests/test_ground_multifidelity_feedback.py` passed 33 tests; scoped Ruff lint and format checks passed. No existing simulation behavior changed. This pilot exposes a local-minimum limitation; do not select a flight policy from it.
+
+## Discrete-step CBF guard prototype (2026-11-03)
+
+- Extended `src/core/unicycle_cbf.py` and its tests, documented the exact guard in `docs/mathematical_formulation.md`, and generated `docs/assets/sitl/cbf_discrete_guard.png` from implemented functions. A test demonstrates that the continuous CBF alone admits a crossing with a two-second held command. The separate guard checks the heading-first integration segment against inflated circles and suppresses translation on intersection; starting inside or touching a circle reports infeasibility. Neither helper is integrated into simulation or flight control.
+- Test-first `.venv/bin/python -m pytest -q tests/test_unicycle_cbf.py` failed at import for the missing guard. Final `.venv/bin/python -m pytest -q tests/test_unicycle_cbf.py tests/test_circular_ground_obstacles.py tests/test_ground_multifidelity_feedback.py` passed 31 tests; scoped Ruff lint and formatting passed. No existing simulation behavior changed. Guard does not check map bounds, physical tracking or inter-drone collisions; comparison and integration remain outstanding.
+
+## Unicycle CBF prototype (2026-11-03)
+
+- Added `src/core/unicycle_cbf.py` and `tests/test_unicycle_cbf.py`; updated the mathematical formulation and deployment plan; generated `docs/assets/sitl/unicycle_cbf_prototype.png` from prototype output. The standalone continuous-time filter projects signed unicycle speed onto circular-obstacle CBF constraints and returns explicit infeasibility. Existing controllers remain unchanged.
+- Test-first `.venv/bin/python -m pytest -q tests/test_unicycle_cbf.py` failed at collection before implementation. Final `.venv/bin/python -m pytest -q tests/test_unicycle_cbf.py tests/test_circular_ground_obstacles.py tests/test_ground_multifidelity_feedback.py` passed 27 tests. Scoped Ruff lint/format passed. No existing simulation behavior changed. The prototype has no map boundary, discrete-time, tracking-error, inter-robot, or flight-safety guarantee; a comparison with the current ground policy and an appropriate command-level formulation remain necessary.
+
+## Registration readiness helper (2026-11-03)
+
+- Added `src/core/registration_readiness.py` and `tests/test_registration_readiness.py`; updated `docs/mathematical_formulation.md` and `docs/sitl_to_real_deployment_plan.md`; generated `docs/assets/sitl/registration_readiness.png` from deterministic helper output. The helper validates same-length stationary sample windows, timestamp freshness and inter-vehicle skew, and unchanged horizontal reset counters before registration. PX4 `VehicleLocalPosition` contains `xy_reset_counter`, but no live adapter has been implemented.
+- The test-first `.venv/bin/python -m pytest -q tests/test_registration_readiness.py` failed at collection before implementation. Final `.venv/bin/python -m pytest -q tests/test_registration_readiness.py tests/test_common_frame_registration.py tests/test_observations.py tests/test_aerial_multifidelity_feedback.py` passed 42 tests. Scoped Ruff lint and format checks passed after formatting the new module. No existing simulation behavior changed. This component does not establish local/shared pair synchronization, common clock domain, axis alignment, reference accuracy or real-world flight safety; those require adapter and field validation.
+
+## Aligned local-frame registration helper (2026-11-03)
+
+- Added `src/core/common_frame.py` and tests in `tests/test_common_frame_registration.py`; updated `docs/mathematical_formulation.md` and `docs/sitl_to_real_deployment_plan.md`; generated `docs/assets/sitl/common_frame_registration.png` using the implemented helper on deterministic positions. The helper computes a translation and inverse translation from simultaneous shared-reference and local snapshots; it does not check alignment, time, localization quality or frame resets and is not wired into SITL or flight.
+- The test-first invocation `.venv/bin/python -m pytest -q tests/test_common_frame_registration.py` initially failed at collection because the helper did not yet exist. After implementation, `.venv/bin/python -m pytest -q tests/test_common_frame_registration.py tests/test_observations.py tests/test_aerial_multifidelity_feedback.py` passed 39 tests; scoped Ruff lint and format checks passed. The initial format check identified the test file; it was formatted and rechecked. No existing runtime behavior changed; the helper requires validated inputs and provides no flight-readiness guarantee.
+
+## Initial common-frame offset method (2026-11-03)
+
+- Updated `docs/architecture/deployment_interface_spec.md` and `docs/sitl_to_real_deployment_plan.md` to assume aligned NED axes initially and estimate per-vehicle offsets at mission initialization from synchronized local poses and an independent common position reference. Gazebo truth is a candidate in SITL; physical deployments require a validated common localization source. Source quality, stationary sampling, heading alignment and frame-reset behavior remain to be tested. Local xy alone cannot determine origin offsets.
+- Documentation only: no production behavior or implemented equations changed; no tests rerun and no numerical or behavioral regression introduced. Mathematical reference remains unchanged.
+
+## Deployment common-frame decision and visual organization (2026-11-03)
+
+- Consolidated the five deployment/SITL visuals under `docs/assets/sitl/` and updated references; future visuals for this work go there. Updated `docs/architecture/deployment_interface_spec.md`, `docs/sitl_to_real_deployment_plan.md`, and the illustrative `docker/scenarios/example_sitl.yaml`: the map now uses `uav_1` local NED horizontal axes (north/east), with a separately verified origin/rotation transform for each other vehicle and re-registration after frame resets. Initial positions alone do not verify estimator origins or axis alignment.
+- Validation: searched for stale image references and old frame labels; parsed the example YAML and verified its north/east axis labels. No production code or equations changed, and no test suite was rerun. No numerical or behavioral regression introduced. Live calibration and reset handling remain unimplemented.
+
+## Live frame and clock inspection (2026-11-03)
+
+- Read-only commands: `docker exec mullet_px4_sitl bash -c 'gz topic -l'`, `gz topic -e -t /world/default/pose/info -n 1`, `gz topic -e -t /clock -n 1`, ROS topic discovery and heartbeat rate, and `ros2 param get` for the second core. Updated `docs/architecture/deployment_contract_baseline.md` and `docs/sitl_to_real_deployment_plan.md`; generated `docs/assets/sitl/mullet_frame_observation.png` with Matplotlib from observed Gazebo and earlier heartbeat coordinates.
+- Gazebo exposed a simulation clock and world poses; ROS discovery showed no ROS clock topic, and both cores had `use_sim_time=false`. Combined heartbeat rate was about 20 Hz across two publishers. One world pose snapshot showed vehicles roughly five metres apart while their separately captured local coordinates were near zero. The snapshots were not synchronized and do not establish a valid transform. No tests or production behavior changed; no numerical or behavioral regression introduced. No mathematical implementation changed.
+
+## Live MULLET read-only inspection (2026-11-03)
+
+- Inspected the user-operated `mullet_px4_sitl` with `docker ps`, `docker exec ... ros2 topic list -t`, `ros2 topic info -v` for heartbeat and `/uav_1/command`, `ros2 service list -t`, `ros2 action list -t`, filtered `ros2 topic echo` heartbeat snapshots and `ros2 param get` for the first core. No commands, services or actions were sent to vehicles. Updated `docs/architecture/deployment_contract_baseline.md` and `docs/sitl_to_real_deployment_plan.md`; generated `docs/assets/sitl/mullet_live_heartbeat_baseline.png` from the actual observed local z values and user-reported targets.
+- Both vehicles reported HOLD and valid local position; local z values were -4.911 and -9.878 m. Live command timeout was 0.25 s and command loss hold 2 s; first core `use_sim_time` was false. Heartbeat and command endpoint QoS matched source inspection. No integration tests or production changes; no numerical or behavioral regression introduced. These observations do not establish shared-frame registration or flight-command performance. The mathematical reference is unchanged.
+
+## Deployment flight-lifecycle boundary (2026-11-03)
+
+- Updated `docs/sitl_to_real_deployment_plan.md`, `docs/architecture/deployment_interface_spec.md`, and `docs/architecture/deployment_contract_baseline.md`: takeoff and landing are external and handled by MULLET; the initial mission assumes each drone is already airborne in HOLD at its assigned altitude. An optional commanded altitude-transition phase is deferred for separate design and validation. This is documentation only: no implementation, equations, tests, numerical results or behavior changed. Live SITL inspection remains pending.
+
+## Example deployment field contrast (2026-11-03)
+
+- Revised the illustrative `docker/scenarios/example_sitl.yaml` LOW smoothing sigma from 2 to 4 grid cells and regenerated `docs/assets/sitl/deployment_example_scenario.png` with a common color scale. This example is not consumed by simulation code. At sigma 2 the LOW/HIGH relative L2 difference was 0.1145; at sigma 4 it is 0.3352. These describe field arrays, not estimator accuracy or a validation study.
+- Validation: deterministic `.venv/bin/python -c` calculations using `build_fidelity_fields` compared sigma values 2, 4 and 6; the Matplotlib visualization was regenerated with `MPLCONFIGDIR=/tmp/mpl-deployment`. No production code or implemented equations changed; no tests rerun for this illustrative configuration. No runtime regression is implied. The example's stronger smoothing is a demonstration choice, not a calibrated sensor model.
+
+## Draft deployment scenario (2026-11-03)
+
+- Added `docker/scenarios/example_sitl.yaml`, updated the deployment plan, and generated `docs/assets/sitl/deployment_example_scenario.png` from its Gaussian components using the existing `build_fidelity_fields` implementation. This is an illustrative manifest, not an implemented or executable configuration; transforms, time domain and safety settings are deliberately unset. The visual shows field values and a virtual obstacle, not a simulated flight.
+- Validation: `.venv/bin/python -c` loaded the YAML with PyYAML and checked three role/fidelity assignments and unset transforms; the visualization was generated with `MPLCONFIGDIR=/tmp/mpl-deployment .venv/bin/python -c`. No production behavior or equations changed, so the mathematical reference is unchanged. No new tests were warranted for this draft configuration; the preceding milestone's 60 relevant tests passed. `docker ps` showed no running containers after authorized Docker access, so live MULLET inspection remains pending. No numerical or behavioral regression was introduced.
+
+## Deployment interface specification (2026-11-03)
+
+- Added `docs/architecture/deployment_interface_spec.md`, updated `docs/sitl_to_real_deployment_plan.md`, and generated `docs/assets/sitl/deployment_sensor_baseline.png` using the existing seeded HIGH sensor and an occupancy raster. The draft specifies frame conversion, logical messages, scenario identity, sensing semantics and initial SITL gates. It is not an implementation or a validated flight contract.
+- `.venv/bin/python -m pytest -q tests/test_multifidelity_sensors.py tests/test_observations.py tests/test_aerial_multifidelity_feedback.py tests/test_ground_multifidelity_feedback.py` — 60 passed. The visual was generated using `MPLCONFIGDIR=/tmp/mpl-deployment .venv/bin/python -c` with seed 123, the existing sensor, 150 samples and a virtual wall. No numerical or behavioral changes were made; the full suite was not rerun. Concrete wire types, frame registration and live timing remain unverified. Mathematical reference unchanged because implementation mathematics did not change.
+
+## Deployment contract baseline (2026-11-03)
+
+- Added `docs/architecture/deployment_contract_baseline.md`, updated `docs/sitl_to_real_deployment_plan.md`, and generated `docs/assets/sitl/deployment_baseline_milestone.png` from the focused test result. Source inspection established MULLET's per-vehicle local NED origins, mission interface, QoS and command freshness behavior. Contracts and acceptance gates remain proposals; no ROS or SITL integration was implemented.
+- Command: `.venv/bin/python -m pytest -q tests/test_aerial_multifidelity_feedback.py` — 8 passed. A Matplotlib script generated the test-count visual; its cache fell back to `/tmp`. The full suite was not rerun; the prior documented run had 325 passes and four known failures. No numerical or behavioral changes were made. Mathematical reference unchanged because no implementation equations changed. Frame registration, concrete schema, measured thresholds and live integration remain open.
+
+## Previous simulation milestone
 
 The full-visibility Proposed--Rudolph--Zhang comparison pipeline is
 **implemented and smoke-verified on 2026-10-21**. It resolves a shared
@@ -3758,3 +4592,256 @@ committed: pull requests upload it as a 30-day workflow artifact, and a push to
 - Numerical and behavioral regressions: none. The renderer reads immutable raw
   arrays and does not rerun or mutate simulation, estimation, scheduling,
   controllers, fields, robot states, or published posteriors.
+
+## SITL circular-obstacle command CBF milestone (2026-11-04)
+
+- Inspected the existing scenario builder, role planners, command gate, agent
+  command stream, deployment settings and unicycle CBF prototype before edits.
+  Existing circles affected sensing only; the unicycle prototype is not the
+  planar velocity interface used by SITL.
+- Added Python-only `src/core/planar_cbf.py`: exact 2D least-change velocity
+  projection under multiple circular CBF constraints, a Euclidean speed limit,
+  and geofence endpoint constraints. No new middleware or concurrency.
+- Added `docker/deployment_obstacle_filter.py` for configured ground-role radius
+  inflation and explicit unsafe/infeasible hold status. Integrated into
+  `docker/deployment_command_gate.py` and `docker/ros_agent.py` at command rate,
+  retaining mission/lease/freshness/registration checks. Status is published as
+  `obstacle_cbf_status`; unsafe/infeasible holds also log warnings.
+- Added `docker/scenarios/sitl_three_drone_two_obstacles.yaml`: centers (25,25)
+  and (32,30), physical radii 3 m, combined vehicle/tracking clearance 1 m,
+  alpha 1/s. Field, vehicles, estimator and other control settings are copied
+  from the 1000-sample high-information/no-replacement scenario. Deterministic
+  tests verify exact HIGH field equality. LOW field construction is unchanged.
+  Aerial-role commands bypass these low virtual obstacles.
+- Added deterministic tests in `tests/test_planar_cbf.py` before integrating the
+  mathematical component; adapter/scenario/gate checks are in
+  `tests/test_deployment_obstacle_filter.py`. Updated the living mathematical
+  formulation and Docker usage documentation in the same milestone.
+- Commands executed: focused `rg`, `cat`, `sed`, `git status --short` architecture
+  inspection; `.venv/bin/python -m pytest -q tests/test_planar_cbf.py` (3 passed);
+  focused 7-file pytest group (45 passed); final command:
+  `.venv/bin/python -m pytest -q tests/test_planar_cbf.py tests/test_deployment_obstacle_filter.py tests/test_deployment_command_gate.py tests/test_deployment_onboard_planner.py tests/test_deployment_scenario.py tests/test_deployment_role_speeds.py tests/test_unicycle_cbf.py tests/test_deployment_sitl_readiness.py tests/test_deployment_agent_gate.py tests/test_deployment_ground_runtime.py tests/test_deployment_planner_runtime.py`
+  (58 passed). Compiled the new core/adapter, command gate and ROS agent using
+  `.venv/bin/python -m compileall -q` (passed).
+- Generated and visually inspected the deterministic implementation-output visual
+  using `.venv/bin/python -m examples.plot_sitl_obstacle_cbf_milestone`.
+  Files: `examples/plot_sitl_obstacle_cbf_milestone.py`,
+  `docs/assets/sitl_obstacle_cbf/summary.png` and `metrics.json`.
+  The 60-second ideal-tracking, fixed-truth-weighted Lloyd rollout changed 162
+  command samples. Minimum continuous segment clearance outside the inflated
+  disks was 0.001599475 m; the additional clearance to physical disks is 1 m.
+  Matplotlib used a temporary cache because the default user cache is read-only;
+  generation succeeded. No failed tests.
+- Regression evidence: legacy configs omit the optional block and preserve
+  command behavior; aerial-role bypass tested; existing onboard regression
+  `test_real_ground_observation_changes_onboard_aerial_proposal` passed, retaining
+  the ground observation -> HIGH posterior -> aerial density -> command chain.
+  No estimator changes or field-value regressions. Near obstacles, ground
+  commands intentionally differ. The visual uses ideal tracking and a fixed
+  truth target, not an actual SITL flight. No flight was started or containers
+  rebuilt for this milestone. Tracking errors and acceleration remain outside
+  this velocity-level guarantee; stalls and inter-drone avoidance are not solved.
+
+
+## Two-obstacle readiness diagnosis and scenario selection fix (2026-11-04)
+
+- Inspected live central and agent manifests: both have scenario hash
+  `bff2975f66125b81fe67694b028ac38d01136c92960ce0fa1f18f3f1da31fc17`.
+  Container logs showed one startup `scenario or team mismatch`; subsequent
+  recorded packets contained valid plans and registered poses for all vehicles.
+  This warning came from a combined diagnostic that also covered an incomplete
+  team during startup. Split clock, target hash, missing-team and extra-team
+  errors in `docker/deployment_ground_runtime.py`.
+- Ran a read-only live readiness container explicitly mounting the two-obstacle
+  scenario: exit 0, ready true, stable readiness observed, no reasons; all three
+  vehicles in HOLD, central error_count 0, both fidelities present. No mission
+  was started. Report: `output/sitl/readiness_obstacle_diagnostic.json` and its
+  event recording. This proves the current deployment can pass preflight when
+  checked against the correct scenario, not mission tracking validation.
+- Fixed `docker/run_sitl.sh`: check/mission infer the running central manifest
+  bind mount when no explicit scenario variable is supplied. A second terminal
+  no longer silently checks the default scenario. Explicit overrides remain.
+  Added stub-Docker shell regression test `tests/test_sitl_scenario_selection.py`
+  and missing-team/hash diagnostic test in `tests/test_deployment_ground_runtime.py`.
+- Corrected initial enabled-CBF status to `awaiting_command` in
+  `docker/deployment_obstacle_filter.py`, tested in
+  `tests/test_deployment_obstacle_filter.py`; HOLD previously misleadingly
+  displayed disabled before its first command. Updated `docker/README.md`.
+- Commands: Docker ps, read-only compose logs and container manifest hashes;
+  read-only compose readiness run with explicit scenario bind and --timeout 8;
+  focused pytest command covering shell selection, ground runtime, onboard
+  planners, readiness, obstacle adapter and command gate (31 passed);
+  `bash -n docker/run_sitl.sh` (passed). A trial topic read used an unavailable
+  Humble setup path; diagnosis proceeded through recorded live packets instead.
+  Generated `docs/assets/sitl_obstacle_cbf/readiness.png` from the successful live
+  JSON report using Matplotlib with MPLCONFIGDIR=/tmp/mfgp-matplotlib.
+- No estimator, motion, coverage or scheduler equations changed. No mathematics
+  update required. No known behavioral regression; scenario overrides and
+  command safety checks are preserved. No containers restarted or flight state
+  changed. Updated container diagnostics/status need the next image rebuild;
+  the host wrapper correction takes effect immediately.
+
+## Obstacles in recorded SITL plots and videos (2026-11-04)
+
+- Added `docker/plot_obstacles.py` shared overlay rendering: physical circles
+  are slate disks with black boundaries, enabled ground CBF inflated radii are
+  red dashed outlines. The manifest's (north,east) centers are explicitly
+  swapped for East-horizontal/North-vertical plotting. Disabled CBFs and empty
+  obstacle maps do not acquire artificial clearance boundaries.
+- Updated `docker/plot_readiness.py` on all five map panels (not retained-count
+  time series), and `docker/replay_sitl.py` on all three animation panels.
+  Paths/markers draw above obstacle patches; the legend distinguishes physical
+  disks from ground-only clearance. All inputs still require matching hashes.
+- Files also changed: `tests/test_sitl_obstacle_overlays.py` and
+  `docker/README.md`. No mathematical equations, estimator behavior, field data,
+  control logic or recorded packet values changed.
+- Validation command:
+  `MPLCONFIGDIR=/tmp/mfgp-matplotlib .venv/bin/python -m pytest -q tests/test_sitl_obstacle_overlays.py tests/test_plot_sitl_summary.py tests/test_replay_sitl.py`:
+  11 passed, including actual FFmpeg video export and overlay checks on every
+  video panel. Initial new summary test failed because its no-posterior fixture
+  has no posterior axis labels; corrected the panel-selection assertion and
+  reran successfully. No production failure was hidden.
+- Generated summary from the real completed recording with
+  `.venv/bin/python -m docker.plot_readiness output/sitl/mission_filtered.json --scenario docker/scenarios/sitl_three_drone_two_obstacles.yaml --output output/sitl_replay/obstacles_summary.png`.
+  Visually inspected: both physical circles and 1 m clearance outlines are
+  correctly located and legible over all fields, including variance.
+- Video command:
+  `.venv/bin/python -m docker.replay_sitl output/sitl/mission_filtered.json --scenario docker/scenarios/sitl_three_drone_two_obstacles.yaml --output output/sitl_replay/obstacles.mp4 --speed 4 --fps 10`.
+  The same MPLCONFIGDIR override was used for both generation commands.
+  Outputs are regenerated offline from the existing recording; no new mission
+  or container restart. Numerical/behavioral regressions: none expected from
+  these display-only changes; past-packet replay and input immutability tests
+  pass unchanged. `git diff --check` passed.
+- Full real-recording video export completed successfully: 607 frames, 10 fps,
+  4x speed, encoded duration 60.7 s from 242.2002 recorder seconds; 437 posterior
+  packets and 484/484/485 per-vehicle poses. Outputs:
+  `output/sitl_replay/obstacles.mp4`, `obstacles.png`, `obstacles.replay.json`.
+  Inspected the exported final frame to verify the same overlays in all panels.
+
+## Clone-and-run onboard/laptop deployment scripts (2026-11-04)
+
+- Inspected existing Compose roles, Dockerfile, entrypoint, runtime imports and
+  local MULLET `package.xml` before changes. Added a standard-library-only host
+  Python CLI, `docker/deploy.py`, with init/build/validate/smoke/up/stop/status/
+  logs/check/mission actions. Host config is git-ignored, uses absolute paths,
+  saves role/vehicle/domain/image/interface source and scenario-file SHA-256,
+  and rejects unacknowledged scenario edits. Explicit config paths and dry-run
+  are supported. No SSH, middleware additions or concurrency in the simulation.
+- Drone `up` selects one agent; laptop `up` selects central and frame-registry
+  only. Separate Compose project names avoid changing existing SITL containers.
+  ENABLE_COMMANDS is always 0 unless drone `up --motion` is explicitly supplied;
+  motion cannot be enabled by an ambient shell variable or laptop startup.
+  Offline validation must succeed before service startup. Stop/log/status remain
+  available after scenario edits. Mission recording reuses existing tools.
+- Added `docker/Dockerfile.hardware` using official ROS Jazzy ros-base Noble,
+  native builds, local matching MULLET interfaces and pinned top-level numerical
+  dependencies. It contains no simulator/PX4 binaries and requires no flight
+  devices or privileged container flag. Existing SITL Dockerfile is unchanged.
+  Both existing Compose files accept MFGP_IMAGE while retaining their old
+  default image. Added offline `docker/validate_deployment.py` for manifest,
+  vehicle, CBF configuration and runtime/ROS message import checks.
+- New tests were written before integrating the CLI. Changed/new files:
+  `docker/deploy.py`, `docker/validate_deployment.py`,
+  `docker/Dockerfile.hardware`, `docker/compose.yaml`,
+  `docker/compose.drone.yaml`, `docker/DEPLOYMENT.md`, `docker/README.md`,
+  `.dockerignore`, `.gitignore`, root `README.md`,
+  `tests/test_deploy_cli.py`, `examples/plot_deployment_setup_milestone.py`,
+  this status reference and the deployment-plan progress note.
+- Relevant pytest groups passed at each step: 13, then 23, finally 44 tests.
+  Final command:
+  `MPLCONFIGDIR=/tmp/mfgp-matplotlib .venv/bin/python -m pytest -q tests/test_deploy_cli.py tests/test_deployment_compose_demo.py tests/test_deployment_onboard_planner.py tests/test_deployment_role_speeds.py tests/test_sitl_scenario_selection.py tests/test_deployment_sitl_readiness.py tests/test_deployment_command_gate.py tests/test_deployment_obstacle_filter.py --junitxml=/tmp/mfgp-deployment-tests.xml`.
+  Includes subprocess CLI tests with a fake Docker executable, failed-validation
+  exit propagation, explicit motion, role selection, legacy SITL shell selection,
+  image context argument boundaries and existing ground-observation -> posterior
+  -> aerial target -> aerial command regression. No failed tests.
+- Used `python3 docker/deploy.py --config /tmp/mfgp-hardware-test.json init
+  --role laptop --interfaces /home/mattia/mullet_sitl_sim/ws/src/mullet-interfaces`
+  and matching drone init with `--vehicle uav_1`; dry-ran up for both roles.
+  Ran actual CLI build twice (initial build and cached final-source refresh),
+  actual laptop/drone Compose validation without creating ROS nodes, and actual
+  network-isolated smoke twice. Used temporary configs, leaving the user's
+  default per-host settings unset. Docker operations required sandbox escalation.
+- Final image `mfgp-deployment:hardware` built on x86_64;
+  manifest-list digest `sha256:23e3390e20a43df3ed11df4206ccd098d68db2eccef1e08eab4c30d6946b95dc`.
+  Runtime validation reports MULLET interfaces 0.1.0 and scenario hash
+  `bff2975f66125b81fe67694b028ac38d01136c92960ce0fa1f18f3f1da31fc17`
+  for both roles. Smoke: LOW=3, HIGH=3, posterior version=2,
+  aerial target max absolute change=0.0001855047533248649.
+- Generated and inspected deterministic visual from actual CLI service plans,
+  pytest JUnit results and hardware-image smoke output with
+  `MPLCONFIGDIR=/tmp/mfgp-matplotlib .venv/bin/python -m examples.plot_deployment_setup_milestone --tests /tmp/mfgp-deployment-tests.xml --smoke /tmp/mfgp-hardware-smoke.json`.
+  Outputs `docs/assets/hardware_deployment/summary.png` and `summary.json`.
+  Ran compileall for the new scripts/example and `git diff --check`: passed.
+- No numerical/behavioral regressions observed. No GP, sensing, controller,
+  scheduler or motion equations changed, so no mathematical-reference change
+  was needed. Existing MULLET and SITL services were not restarted; no flight
+  commands or missions were sent. Only one-off import validators and isolated
+  offline smoke ran. ARM64 builds, real hardware networking/localization,
+  tracking and physical flight remain unvalidated. Default base tag/apt indexes
+  are mutable; guide explains freezing a tested image for a flight campaign.
+
+## Automatic pinned MULLET interface source (2026-11-04)
+
+- User confirmed the local interface checkout matches deployed drones and
+  supplied `https://github.com/skymule-ai/mullet-interfaces/tree/main`.
+  Read-only Git inspection found clean local HEAD
+  `c3d87e64f415dc7240764876e4d52cb962a7c097`, with matching origin repository.
+  Remote HEAD was already `48465ea2dd05cb4a4f98d13a4dd21c8d0038e036`;
+  deliberately pinned the user-confirmed deployed commit rather than main.
+- Added `docker/mullet_interfaces.lock.json`. Updated `docker/deploy.py` so
+  builds without --interfaces supply a full-SHA HTTPS Git named build context
+  to Docker Buildx. Docker fetches the source directly; no extra checkout or
+  host Python packages are needed. Init stores the repository and full commit
+  in per-host config. Existing local overrides retain precedence; old configs
+  without explicit pins fall back to the checked-in lock. Invalid/moving
+  branch pins are rejected before a Docker build starts.
+- Tests added before integration cover default remote context, full SHA
+  validation, saved pin identity and missing local override directories.
+  Updated `docker/DEPLOYMENT.md` clone/build commands and prerequisites, and
+  `examples/plot_deployment_setup_milestone.py` to show the exact pin.
+  These, the lock, CLI, `tests/test_deploy_cli.py` and this status file are the
+  changed files for this milestone. No simulation or estimator production code
+  changed; no mathematical equations changed.
+- Commands: local Git remote/status/rev-parse; git ls-remote HTTPS HEAD. The
+  initial sandbox remote probe failed DNS resolution and was rerun with
+  escalation, successfully. Web URL fetch was unavailable; Git access and the
+  real Docker source fetch supplied the verification instead.
+- Focused tests: 16 passed. Final test invocation:
+  `MPLCONFIGDIR=/tmp/mfgp-matplotlib .venv/bin/python -m pytest -q tests/test_deploy_cli.py tests/test_deployment_compose_demo.py tests/test_deployment_onboard_planner.py tests/test_deployment_role_speeds.py tests/test_sitl_scenario_selection.py tests/test_deployment_sitl_readiness.py tests/test_deployment_command_gate.py tests/test_deployment_obstacle_filter.py --junitxml=/tmp/mfgp-pinned-interface-tests.xml`:
+  46 passed. No failed tests. Includes the existing ground observation -> HIGH
+  posterior -> aerial target -> aerial command behavioral regression.
+- Initialized /tmp/mfgp-pinned-interfaces.json with drone/uav_1 and NO interface
+  path. Ran CLI dry-run build, then real build, validate and smoke using that
+  config. Build fetched the exact GitHub SHA and compiled mullet_interfaces;
+  final image manifest-list digest
+  `sha256:2650c027522d9b7ebaa04e7b98f554cc3b72b048299b37a4c46bd51fefd74d88`.
+  Validation reports x86_64, vehicle uav_1, interfaces 0.1.0 and the unchanged
+  two-obstacle scenario hash. Offline smoke: LOW=3, HIGH=3, posterior version=2,
+  aerial target max absolute change=0.0001855047533248649, matching the previous
+  local-source image. No numerical or behavioral regression observed.
+- Generated/inspected deterministic real-output visual with
+  `MPLCONFIGDIR=/tmp/mfgp-matplotlib .venv/bin/python -m examples.plot_deployment_setup_milestone --tests /tmp/mfgp-pinned-interface-tests.xml --smoke /tmp/mfgp-hardware-smoke.json --output docs/assets/pinned_interfaces/summary.png`.
+  Its JSON sidecar records actual test/smoke/service-plan outputs. compileall
+  and git diff --check passed. No ROS nodes, flight commands or missions were
+  started. ARM64 and physical deployment remain unvalidated.
+
+## Scoped deployment commit validation (2026-11-04)
+
+- Prepared two commits for the GP filtering/retention prerequisites and the
+  complete recent SITL/deployment workflow. Included all required new runtime
+  modules, container entry points, scenarios, relevant tests/examples and small
+  deployment validation figures. Kept unrelated paper, LaTeX and experiment
+  edits out; excluded local machine configuration, recordings, caches and videos.
+- Exported the exact staged Git index with `git checkout-index --all` into
+  `/tmp/mfgp-commit-check-1yczpqub` and tested there, rather than relying on the
+  mixed working tree. Ran the staged tests plus existing GP, estimator,
+  observation, aerial-feedback and sensor tests using the existing virtualenv:
+  **233 passed in 11.71 s**. JUnit: `/tmp/mfgp-commit-tests.xml`.
+- Ran the clean-snapshot offline smoke on the two-obstacle scenario and generated
+  `docs/assets/commit_validation/summary.png` and its JSON sidecar using
+  `examples.plot_deployment_setup_milestone` with the actual JUnit/smoke output.
+  The staged stack preserves the HIGH-observation -> posterior -> aerial target
+  -> command behavioral regression. No failed tests or observed regressions.
+- `git diff --cached --check` passed. No algorithmic changes were introduced
+  while preparing these commits; no equation changes required. No flight
+  commands, Docker service restarts or remote push performed.
