@@ -14,7 +14,7 @@ from mullet_interfaces.msg import MissionCommand
 import yaml
 
 from docker.deployment_readiness import evaluate_readiness
-from docker.deployment_settings import scenario_path
+from docker.deployment_settings import vehicle_endpoint, scenario_path
 from src.core.deployment_scenario import build_scenario
 
 
@@ -56,7 +56,7 @@ class ReadinessNode(Node):
         for v in manifest["vehicles"]:
             self.create_subscription(
                 MissionCommand,
-                v["namespace"] + "/command",
+                vehicle_endpoint(v["namespace"], "command"),
                 lambda message, vid=v["id"]: self._command(vid, message),
                 QoSProfile(depth=100, reliability=ReliabilityPolicy.BEST_EFFORT),
             )

@@ -28,7 +28,7 @@ class FrameNode(Node):
         ) as stream:
             manifest = yaml.safe_load(stream)
         self.scenario_hash = build_scenario(manifest).scenario_hash
-        self.registry = FrameRegistry([v["id"] for v in manifest["vehicles"]], "uav_1")
+        self.registry = FrameRegistry.from_manifest(manifest)
         self.session = uuid.uuid4().hex
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         latched = QoSProfile(

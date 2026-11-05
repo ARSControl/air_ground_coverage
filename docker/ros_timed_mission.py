@@ -15,7 +15,7 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 import yaml
 
-from docker.deployment_settings import DeploymentSettings, scenario_path
+from docker.deployment_settings import vehicle_endpoint, DeploymentSettings, scenario_path
 from docker.ros_readiness import ReadinessNode
 from docker.timed_mission import MissionClock, health_failure_snapshot
 
@@ -29,7 +29,7 @@ class TimedMissionNode(ReadinessNode):
         self.ids = [v["id"] for v in manifest["vehicles"]]
         self.mission_clients = {
             kind: {
-                v["id"]: self.create_client(Trigger, v["namespace"] + "/" + suffix)
+                v["id"]: self.create_client(Trigger, vehicle_endpoint(v["namespace"], suffix))
                 for v in manifest["vehicles"]
             }
             for kind, suffix in (("start", "start_mission"), ("hold", "hold"))

@@ -9,7 +9,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from mullet_interfaces.msg import DroneHeartbeat, MissionCommand
 import yaml
 
-from docker.deployment_settings import scenario_path
+from docker.deployment_settings import vehicle_endpoint, scenario_path
 from docker.ros_agent import SensingAgent
 
 
@@ -26,7 +26,7 @@ def main():
         executor.add_node(agent)
         agent.create_subscription(
             MissionCommand,
-            agent.expected_namespace + "/command",
+            vehicle_endpoint(agent.expected_namespace, "command"),
             lambda msg, v=agent.vehicle_id: received[v].append(msg),
             QoSProfile(depth=100, reliability=ReliabilityPolicy.BEST_EFFORT),
         )

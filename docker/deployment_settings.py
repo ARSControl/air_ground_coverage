@@ -6,6 +6,23 @@ import os
 import re
 
 
+def valid_vehicle_namespace(namespace):
+    return isinstance(namespace, str) and (
+        namespace == '/'
+        or re.fullmatch(r'/[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*', namespace)
+        is not None
+    )
+
+
+def vehicle_endpoint(namespace, suffix):
+    """Resolve a relative MULLET endpoint under a validated ROS namespace."""
+    if not valid_vehicle_namespace(namespace) or not isinstance(suffix, str) or re.fullmatch(
+        r'[A-Za-z_][A-Za-z0-9_]*', suffix
+    ) is None:
+        raise ValueError('invalid vehicle namespace or endpoint')
+    return namespace.rstrip('/') + '/' + suffix
+
+
 def scenario_path():
     return os.environ.get(
         "MFGP_SCENARIO", "/opt/mfgp/docker/scenarios/sitl_three_drone.yaml"
@@ -65,11 +82,7 @@ class DeploymentSettings:
                     not isinstance(vid, str)
                     or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", vid) is None
                     or vid in ids
-                    or not isinstance(namespace, str)
-                    or re.fullmatch(
-                        r"/[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*", namespace
-                    )
-                    is None
+                    or not valid_vehicle_namespace(namespace)
                     or namespace in namespaces
                     or not math.isfinite(altitude)
                     or altitude <= 0

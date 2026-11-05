@@ -24,6 +24,14 @@ class FrameSample:
 class FrameRegistry:
     """Stationary pair-based startup offsets with consistency invalidation."""
 
+    @classmethod
+    def from_manifest(cls, manifest):
+        """Use the first scenario vehicle's local NED frame as map reference."""
+        ids = [vehicle['id'] for vehicle in manifest['vehicles']]
+        if not ids:
+            raise ValueError('invalid registry configuration: no vehicles')
+        return cls(ids, ids[0])
+
     def __init__(
         self,
         vehicle_ids,

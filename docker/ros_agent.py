@@ -17,7 +17,7 @@ import yaml
 from docker.deployment_agent_gate import SamplingGate
 from docker.deployment_command_gate import accepted_velocity
 from docker.deployment_obstacle_filter import ObstacleFilter
-from docker.deployment_settings import DeploymentSettings, scenario_path
+from docker.deployment_settings import vehicle_endpoint, DeploymentSettings, scenario_path
 from docker.mission_lease import lease_expiry
 from docker.deployment_onboard_planner import OnboardPlanner
 from src.core.deployment_scenario import build_scenario
@@ -91,7 +91,7 @@ class SensingAgent(Node):
         if enable_commands:
             self.command_publisher = self.create_publisher(
                 MissionCommand,
-                scenarios[0]["namespace"] + "/command",
+                vehicle_endpoint(scenarios[0]["namespace"], "command"),
                 QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
             )
             self.create_timer(1.0 / self.settings.command_hz, self._command)

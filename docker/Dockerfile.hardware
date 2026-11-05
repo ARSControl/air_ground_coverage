@@ -1,5 +1,5 @@
 # Native builds on each host; no simulator, PX4 binary or flight-device access.
-ARG BASE_IMAGE=ros:jazzy-ros-base-noble
+ARG BASE_IMAGE=ghcr.io/skymule-ai/mullet-base:v0.5.1
 FROM ${BASE_IMAGE}
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \

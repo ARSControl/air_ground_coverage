@@ -19,7 +19,7 @@ change MULLET, take off, land, or start missions during `up`.
   version. No separate interface checkout is required. A local `--interfaces`
   override remains available for development or offline source use.
 - Compatible ROS Jazzy MULLET stack. The hardware image uses
-  `ros:jazzy-ros-base-noble`, not the simulator image. Docker builds natively on
+  `ghcr.io/skymule-ai/mullet-base:v0.5.1`, as the hardware base. Docker builds natively on
   each machine; AMD64 and ARM64 use their respective base image variants.
   The ARM64 build and hardware execution still need testing on your computers.
 - Matching ROS domain across the team, reachable laptop/drone network, working
@@ -153,3 +153,37 @@ freeze a tested image digest for a particular flight campaign.
 References: [Docker Buildx named contexts and local image loading](https://docs.docker.com/reference/cli/docker/buildx/build/),
 [official ROS images](https://hub.docker.com/_/ros), and
 [Linux host networking](https://docs.docker.com/engine/network/drivers/host/).
+
+The first entry in the shared scenario `vehicles` list defines the map reference
+vehicle. IDs may be renamed when their namespaces and host configurations agree;
+keep vehicle order identical on all hosts.
+
+### Existing MULLET instance 0 at the root namespace
+
+Use the identity and namespace advertised by `/mullet/heartbeat` verbatim.
+For an unchanged instance-0 MULLET reporting `drone_id: uav_0` and
+`ros_namespace: /`, the first hardware scenario entry is:
+
+```yaml
+- id: uav_0
+  namespace: /
+  role: ground
+```
+
+Keep its remaining altitude and sensor settings. Our adapter accepts `/` and
+resolves relative endpoints to `/command`, `/start_mission`, and `/hold`.
+Heartbeat ID/namespace/schema checks remain strict; no aliases or remapping of
+PX4 instance/system settings are performed. Multiple vehicles with the same ROS
+namespace are rejected, including multiple root namespaces on the shared domain.
+Confirm every other drone's heartbeat before assigning its scenario entry.
+
+After distributing changed source and the identical hardware scenario to all
+hosts, reinitialize the drone with `--vehicle uav_0 --domain 99` and the laptop
+with `--role laptop --domain 99 --image mfgp-deployment:local`, both using
+`--force --scenario docker/scenarios/hardware_three_drone.yaml`. Reinitializing
+records the new scenario hash. Rebuild each image (SITL laptop:
+`docker compose -f docker/compose.yaml build central`; hardware Jetson:
+`python3 docker/deploy.py build`), run `smoke` and `validate`, then ordinary `up`
+with commands disabled. A disarmed heartbeat should show `state: IDLE` rather
+than `UNKNOWN`; registration and flight pose validity still require the current
+armed/airborne gates. This configuration is not hardware flight validation.

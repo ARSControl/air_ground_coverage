@@ -133,7 +133,7 @@ def main(argv=None):
     init.add_argument('--interfaces', type=Path, help='Optional local package override; default downloads the pinned deployed Git revision')
     init.add_argument('--domain', type=int, default=42)
     init.add_argument('--image', default='mfgp-deployment:hardware')
-    init.add_argument('--base-image', default='ros:jazzy-ros-base-noble')
+    init.add_argument('--base-image', default='ghcr.io/skymule-ai/mullet-base:v0.5.1')
     init.add_argument('--force', action='store_true')
     for action in ('build','validate','smoke','up','stop','status','logs','check','mission'):
         command = sub.add_parser(action)

@@ -15,7 +15,7 @@ import yaml
 
 from docker.mission_lease import lease_expiry
 from docker.ros_timed_mission import TimedMissionNode, execute
-from docker.deployment_settings import scenario_path
+from docker.deployment_settings import vehicle_endpoint, scenario_path
 from src.core.deployment_scenario import build_scenario
 
 
@@ -60,7 +60,7 @@ class FakeMullet(Node):
         self.command_pubs = {
             v["id"]: self.create_publisher(
                 MissionCommand,
-                v["namespace"] + "/command",
+                vehicle_endpoint(v["namespace"], "command"),
                 QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
             )
             for v in manifest["vehicles"]
@@ -69,7 +69,7 @@ class FakeMullet(Node):
             for kind in ("start_mission", "hold"):
                 self.create_service(
                     Trigger,
-                    v["namespace"] + "/" + kind,
+                    vehicle_endpoint(v["namespace"], kind),
                     lambda request, response, vid=v["id"], action=kind: self._service(
                         vid, action, response
                     ),
