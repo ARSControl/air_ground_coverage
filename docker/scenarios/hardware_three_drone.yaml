@@ -38,8 +38,8 @@ field:
   low_smoothing_sigma_cells: 4.0
   truth_rho: 0.8
 vehicles:
-- id: uav_0
-  namespace: /
+- id: uav_1
+  namespace: /uav_1
   role: ground
   altitude_m: 5.0
   map_from_local_ned_xy: null
@@ -52,8 +52,8 @@ vehicles:
     sample_count: 3
     noise_variance: 0.0001
     seed: 101
-- id: uav1
-  namespace: /uav1
+- id: uav_2
+  namespace: /uav_2
   role: ground
   altitude_m: 5.0
   map_from_local_ned_xy: null
@@ -66,8 +66,8 @@ vehicles:
     sample_count: 3
     noise_variance: 0.0001
     seed: 102
-- id: uav2
-  namespace: /uav2
+- id: uav_3
+  namespace: /uav_3
   role: aerial
   altitude_m: 10.0
   map_from_local_ned_xy: null
